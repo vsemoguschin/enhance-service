@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Модели и бинарники движка (перекачиваемые — не в git)
+models/
+models-gfpgan/
+gfpgan/
+*.pth
+*.param
+*.bin
+realesrgan-ncnn-vulkan
+*.zip
+
+# Кэши/temp
+pip-tmp/
+.cache/
+/tmp/
+*.log
+
+# Рабочая директория обработки
+work/
+enhance-work/
+
+# OS
+.DS_Store
+
+# Движок (скачивается scripts/download_models.sh) — не в git
+/bin/
+
+# Eval-артефакты с РЕАЛЬНЫМИ фото клиентов — НЕ коммитить (приватность)
+docs/eval-stage0/test-input/
+docs/eval-stage0/test-output/
+docs/eval-stage0/test-compare/
