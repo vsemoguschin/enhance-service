@@ -4,8 +4,10 @@ AI-улучшение (апскейл) изображений для EASY-CRM. �
 картинка на вход → улучшенная на выход. Деплой на **codex**-бокс. Используется
 book-editor'ом через async-API (контракт **C1**).
 
-**Статус:** MVP-движок (контракт C1) написан и проверен локально (smoke-тест PASS) —
-см. [docs/build-log.md](docs/build-log.md). Деплой на codex и интеграция из book-editor — впереди.
+**Статус:** реализовано и **задеплоено на codex** (pm2, `/health` ок, доступ с crm есть, smoke на codex проходит).
+В book-editor фича пока **выключена** флагом `ENHANCE_ENABLED=false` — на codex нет GPU, апскейл слишком
+медленный (минуты/фото на llvmpipe). Для прода нужен GPU-бокс или внешний API — см.
+[docs/operations.md](docs/operations.md).
 
 ## Роль в системе
 
@@ -28,7 +30,7 @@ bounded queue, лимиты входа).
 - Восстановление лиц (opt-in) — **следующий шаг** (нужен gfpgan-ncnn или отдельный torch-воркер);
   MVP — только Real-ESRGAN.
 
-## Планируемая структура (когда начнём код)
+## Структура
 
 ```
 enhance-service/
@@ -64,6 +66,9 @@ Vulkan ICD (`apt-get install -y libvulkan1 mesa-vulkan-drivers`) — прове�
 
 ## Документация
 
+- [docs/architecture.md](docs/architecture.md) — архитектура: C1, движок (EXIF/aspect/ncnn), очередь, конфиг.
+- [docs/operations.md](docs/operations.md) — эксплуатация на codex: топология, перф/GPU-решение, egress-замок, мониторинг.
+- [docs/deploy-runbook.md](docs/deploy-runbook.md) — пошаговый деплой 3 сервисов.
 - [docs/задача.md](docs/задача.md) — контекст, решения, метрики, результаты Этапа 0.
 - [docs/план.md](docs/план.md) — архитектура, pipeline, лимиты, этапы, индекс веток.
 - [docs/contracts.md](docs/contracts.md) — контракты C1/C2/C3.
