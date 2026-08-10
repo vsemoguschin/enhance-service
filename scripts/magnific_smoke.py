@@ -71,6 +71,34 @@ PROMPTS = {
         "НЕ меняй улыбку и положение губ, не открывай рот, не добавляй зубы, не наноси косметику, "
         "не меняй причёску, одежду, позу и композицию кадра."
     ),
+    # Под сканы старых отпечатков: царапины, пятна, выцветание, вспышка.
+    # Основа — промпт владельца; добавлены защита личности, запрет ретуши и запрет трогать фон
+    # (исходная формулировка про «soft background color» разрешала модели переделать фон).
+    "old-photo": (
+        "Restore and enhance an old damaged photo. Remove scratches, stains, dust and noise. "
+        "Reconstruct faded or torn areas while preserving original details. "
+        "Slightly sharpen the image for better clarity, but keep it realistic. "
+        "Apply natural and era-appropriate colors to skin, hair and clothing; keep background "
+        "colors natural and muted. "
+        "PRESERVE EXACTLY: facial features, expressions, mouth and eye position, age and identity "
+        "of every person, glasses, jewellery, clothing patterns, pose, composition and crop. "
+        "Do NOT replace, simplify or repaint the background. "
+        "Do NOT retouch or smooth skin, do not remove wrinkles, moles or scars, "
+        "do not apply beauty filters or plastic-looking surfaces. "
+        "The final result should look like an old photo that has been realistically restored "
+        "and colorized, while respecting its original appearance."
+    ),
+    # Против «пластика»: модели по умолчанию сглаживают кожу, и на печати это видно сразу.
+    # Запреты работают заметно лучше просьб, поэтому здесь их больше, чем пожеланий.
+    "texture": (
+        "Восстанови это фото для печати, сохранив фотографическую фактуру. "
+        "Сохрани и подчеркни микротекстуру: поры и рельеф кожи, отдельные волоски и пряди, "
+        "ворс и плетение ткани, вязку головного убора, листву и траву. "
+        "НЕ сглаживай кожу, НЕ применяй бьюти-ретушь, размытие и шумоподавление, "
+        "НЕ создавай пластиковых и восковых поверхностей, не убирай морщины и родинки. "
+        "Сохрани естественное зерно и микроконтраст, резкость как у съёмки на хороший объектив. "
+        "Черты лиц, мимику, очки, причёску и одежду оставь без изменений."
+    ),
     # Под фотокнигу: главное — сходство лиц, поэтому запреты сформулированы явно.
     "restore": (
         "Восстанови это фото для печати в фотокниге. Убери размытие, шум и артефакты сжатия. "
