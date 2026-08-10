@@ -47,6 +47,9 @@ ENGINES = {
     # Генеративное восстановление: не увеличивает, а перерисовывает кадр по промпту.
     # В вебе владелец пользуется Seedream 5 pro, в API доступен 4.5 — результат может отличаться.
     "seedream-edit": "/v1/ai/text-to-image/seedream-v4-5-edit",
+    # Nano Banana (Gemini 2.5 Flash Image). Параметра пропорций нет — кадр берётся от входа,
+    # поэтому здесь не бывает растяжения под пресет aspect_ratio.
+    "nano-banana": "/v1/ai/gemini-2-5-flash-image-preview",
 }
 
 PROMPTS = {
@@ -158,6 +161,12 @@ def show_quota_headers(headers: dict, label: str) -> None:
 
 def build_payload(args: argparse.Namespace, image_b64: str) -> dict:
     """Тела запросов у creative и precision разные — общий только image."""
+    if args.engine == "nano-banana":
+        return {
+            "prompt": args.prompt or PROMPTS[args.preset],
+            "reference_images": [image_b64],
+        }
+
     if args.engine == "seedream-edit":
         payload = {
             "prompt": args.prompt or PROMPTS[args.preset],
@@ -258,9 +267,10 @@ def main() -> int:
     # У seedream-edit масштаба нет — разрешение выхода выбирает модель (до 4 Мп).
     dims = image_dims(args.image)
     scale_num = float(str(args.scale).rstrip("x"))
-    if args.engine == "seedream-edit":
+    if args.engine in ("seedream-edit", "nano-banana"):
         print(f"промпт:  [{args.preset}] {(args.prompt or PROMPTS[args.preset])[:70]}…")
-        print(f"формат:  {args.aspect_ratio}, выход до 4 Мп (задаёт модель)")
+        ratio = args.aspect_ratio if args.engine == "seedream-edit" else "как у входа"
+        print(f"формат:  {ratio}, разрешение выхода задаёт модель")
     elif dims:
         w, h = dims
         out_mp = w * h * scale_num**2 / 1e6
@@ -313,7 +323,7 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     suffix = (
         f"{args.engine}-{args.preset}"
-        if args.engine == "seedream-edit"
+        if args.engine in ("seedream-edit", "nano-banana")
         else f"{args.engine}_x{str(args.scale).rstrip('x')}"
     )
     out_path = OUT_DIR / f"{args.image.stem}_{suffix}.jpg"
