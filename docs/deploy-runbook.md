@@ -75,6 +75,47 @@ ENHANCE_MAX_CONCURRENT=2
 
 ---
 
+## 2b. Переключение на провайдера magnific (2026-08-10)
+
+Причина, по которой фича стояла выключенной (нет GPU), снимается: компьют уходит во внешний API,
+ncnn-бинарь и модели в этом режиме не нужны.
+
+```bash
+ssh codex
+cd /opt/enhance-service
+git fetch && git checkout main && git pull        # после merge ветки agent/2026-08-10-magnific-api-test
+.venv/bin/pip install -r requirements.txt          # добавился certifi
+```
+
+В окружение процесса (pm2 env или `.env`, **в git не коммитить**):
+```
+ENHANCE_PROVIDER=magnific
+MAGNIFIC_API_KEY=<ключ из кабинета Magnific>
+MAGNIFIC_PRESET=texture       # дефолт прода, принят владельцем
+MAGNIFIC_UPSCALE=false        # апскейл платится по площади результата
+```
+
+```bash
+pm2 restart enhance-service --update-env
+curl -s localhost:8011/health   # ожидается provider=magnific, status=ok, engine.key=true
+```
+
+⚠️ **Проверить исходящий HTTPS от имени сервиса** — на codex OUTPUT для uid 109 закрыт по портам:
+```bash
+sudo -u codex curl -s -o /dev/null -w '%{http_code}\n' -X POST https://api.magnific.com/v1/ai/image-upscaler
+```
+`401` = хост доступен (ключа в запросе нет — так и надо). `000` = егресс закрыт, нужно правило OUTPUT
+на 443 для uid 109 (по аналогии с правилом для 8011) + персистентность в up-script.
+
+Smoke на боксе (полный цикл C1, ~25 с, спишет 50 кредитов ≈ 4.6 ₽):
+```bash
+curl -s -X POST localhost:8011/enhance/start -H "X-Enhance-Api-Key: $ENHANCE_API_KEY" \
+  -F "file=@/tmp/test.jpg" -F "target_w=2000" -F "target_h=1700"
+curl -s localhost:8011/enhance/status/<job_id> -H "X-Enhance-Api-Key: $ENHANCE_API_KEY"
+curl -s -o /tmp/out.jpg localhost:8011/enhance/result/<job_id> -H "X-Enhance-Api-Key: $ENHANCE_API_KEY"
+```
+Ожидается: `done` за ~25 с, на выходе JPEG с **той же пропорцией**, что у входа (инвариант сервиса).
+
 ## 4. Постепенная раскатка
 1. `ENHANCE_ENABLED=true` (pm2 restart --update-env) — сперва для себя/узкой группы.
 2. End-to-end: улучшить фото → создан вариант `enhanced` в file-platform → экспорт PDF/ZIP использует enhanced.
@@ -86,7 +127,10 @@ ENHANCE_MAX_CONCURRENT=2
 - Полный: revert merge book-editor. file-platform/enhance-service можно оставить (не мешают).
 
 ## Чеклист после деплоя
-- [ ] `vulkaninfo` на codex показывает device
+- [ ] `vulkaninfo` на codex показывает device — **только для `ENHANCE_PROVIDER=local`**
+- [ ] при `magnific`: `/health` отдаёт `provider=magnific`, `engine.key=true`
+- [ ] при `magnific`: исходящий на `api.magnific.com` от uid 109 даёт `401`, не `000`
+- [ ] при `magnific`: smoke-цикл C1 отработал, пропорция выхода = пропорции входа
 - [ ] health enhance-service доступен с crm (с ключом)
 - [ ] file-platform: новый EXIF-фото → вариант ровный; миграция `enhanced` применена
 - [ ] ключи совпадают (book-editor↔file-platform, book-editor↔enhance-service)
