@@ -40,6 +40,11 @@ class Settings:
         # Апскейл тарифицируется по площади результата — по умолчанию выключен.
         self.magnific_upscale = _bool("MAGNIFIC_UPSCALE", False)
         self.magnific_autocontrast = _bool("MAGNIFIC_AUTOCONTRAST", True)
+        # Порог расхождения пропорции с ближайшим пресетом Seedream, выше которого генерация
+        # запрещена. 0.20 подобран по фактам: селфи 1.17 (расхождение 14%) отработало отлично,
+        # а сломалась панорама 2.22 — её отсекает отдельная проверка на экстремальный формат,
+        # см. _generative_is_safe. То есть решает не расхождение, а сама ширина кадра.
+        self.magnific_max_aspect_drift = float(os.getenv("MAGNIFIC_MAX_ASPECT_DRIFT", "0.20"))
 
         # Engine
         self.ncnn_bin = os.getenv("ENHANCE_NCNN_BIN", str(base / "bin" / "realesrgan-ncnn-vulkan"))

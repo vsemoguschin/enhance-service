@@ -133,6 +133,25 @@ def _nearest_aspect(ratio: float) -> Tuple[str, float]:
     return name, ASPECT_PRESETS[name]
 
 
+def _generative_is_safe(width: int, height: int) -> Tuple[bool, str]:
+    """Можно ли пускать кадр через генеративную модель.
+
+    Seedream выбирает пропорцию выхода из фиксированного списка. Когда кадр далёк от любого
+    пресета, модель не дополняет края, а пересобирает композицию: на панораме 2.22:1 она
+    приблизила крайних людей и дорисовала два новых лица. Для таких кадров генерация
+    запрещена — отдаём их апскейлеру, который ничего не выдумывает.
+    """
+    ratio = width / height
+    _, preset_ratio = _nearest_aspect(ratio)
+    drift = abs(preset_ratio - ratio) / ratio
+
+    if drift > settings.magnific_max_aspect_drift:
+        return False, f"пропорция {ratio:.2f} далека от пресетов (расхождение {drift * 100:.0f}%)"
+    if ratio > 2.0 or ratio < 0.5:
+        return False, f"панорамный кадр (пропорция {ratio:.2f})"
+    return True, ""
+
+
 def _pad_to_ratio(img: np.ndarray, target: float) -> np.ndarray:
     """Дополняет кадр зеркальными полями — модель читает их как продолжение сцены."""
     h, w = img.shape[:2]
@@ -195,6 +214,47 @@ def _prepare(img: np.ndarray) -> np.ndarray:
     return img
 
 
+def _upscale_only(
+    img: np.ndarray,
+    orig_ratio: float,
+    output_path: str,
+    target_w: Optional[int],
+    target_h: Optional[int],
+    progress_cb,
+) -> Tuple[int, int]:
+    """Путь без генерации: Precision-апскейлер увеличивает, но ничего не дорисовывает.
+
+    Пропорция у него берётся от входа, поэтому pad/crop не нужны.
+    """
+    from . import engine  # локальный импорт: переиспользуем запись с капами
+
+    need = 2
+    if target_w and target_h:
+        need = max(2, min(4, round(max(target_w / img.shape[1], target_h / img.shape[0]))))
+    if img.shape[1] * img.shape[0] * need**2 / 1e6 > MAX_UPSCALE_OUT_MP:
+        need = 2
+
+    raw = _run_task(
+        PRECISION_PATH,
+        {"image": _encode_b64(img), "scale_factor": need, "flavor": "photo"},
+        progress_cb,
+        lo=10,
+        hi=90,
+    )
+    out = _crop_to_ratio(_decode(raw), orig_ratio)
+
+    longest = max(out.shape[1], out.shape[0])
+    if longest > settings.max_output_px:
+        s = settings.max_output_px / longest
+        out = cv2.resize(
+            out, (round(out.shape[1] * s), round(out.shape[0] * s)), interpolation=cv2.INTER_AREA
+        )
+
+    w, h = engine._write_jpeg_capped(out, Path(output_path))
+    log.info("magnific(upscale-only) done: -> %dx%d", w, h)
+    return w, h
+
+
 def enhance(
     input_path: str,
     output_path: str,
@@ -219,6 +279,12 @@ def enhance(
     if progress_cb:
         progress_cb(5)
     prepared = _prepare(img)
+
+    safe, reason = _generative_is_safe(orig_w, orig_h)
+    if not safe:
+        log.warning("magnific: генерация пропущена — %s; апскейлим без выдумывания", reason)
+        return _upscale_only(prepared, orig_ratio, output_path, target_w, target_h, progress_cb)
+
     aspect_name, aspect_ratio = _nearest_aspect(orig_ratio)
     padded = _pad_to_ratio(prepared, aspect_ratio)
 
