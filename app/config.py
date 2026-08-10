@@ -30,8 +30,13 @@ class Settings:
         self.magnific_base_url = os.getenv("MAGNIFIC_BASE_URL", "https://api.magnific.com").strip()
         self.magnific_preset = os.getenv("MAGNIFIC_PRESET", "texture").strip()
         self.magnific_preset_fallback = "texture"
-        self.magnific_timeout_s = _int("MAGNIFIC_TIMEOUT_S", 300)
-        self.magnific_poll_s = _int("MAGNIFIC_POLL_S", 3)
+        # Меньше, чем ENHANCE_MAX_WAIT_MS у book-editor (180с): сервис должен сдаваться раньше
+        # клиента, иначе кредиты тратятся на результат, который уже некому забрать.
+        self.magnific_timeout_s = _int("MAGNIFIC_TIMEOUT_S", 150)
+        # Опрос статуса тоже расходует rate limit Magnific (50 запросов/мин на ключ),
+        # поэтому интервал влияет на предельное число воркеров — см. self.workers.
+        # 8с: 4 воркера × 2 задачи/мин × (1 POST + ~4 опроса) ≈ 40 запросов/мин, запас к лимиту 20%.
+        self.magnific_poll_s = _int("MAGNIFIC_POLL_S", 8)
         # Апскейл тарифицируется по площади результата — по умолчанию выключен.
         self.magnific_upscale = _bool("MAGNIFIC_UPSCALE", False)
         self.magnific_autocontrast = _bool("MAGNIFIC_AUTOCONTRAST", True)
@@ -51,6 +56,13 @@ class Settings:
         self.max_input_px = _int("ENHANCE_MAX_INPUT_MP", 80) * 1_000_000
         self.max_input_bytes = _int("ENHANCE_MAX_INPUT_MB", 60) * 1024 * 1024
         self.queue_max = _int("ENHANCE_QUEUE_MAX", 20)
+
+        # Сколько джобов считается одновременно.
+        # local: 1 — ncnn упирается в CPU бокса, параллель только замедлит и задушит соседей.
+        # magnific: 4 — воркер почти всё время ждёт сеть, но упирается в rate limit Magnific
+        # (50 запросов/мин на ключ). Одна задача ≈ 1 POST + ~5 опросов за ~30с, то есть
+        # 4 воркера ≈ 48 запросов/мин. Больше — и API начнёт отвечать нам 429.
+        self.workers = _int("ENHANCE_WORKERS", 4 if self.provider == "magnific" else 1)
         self.job_timeout_s = _int("ENHANCE_JOB_TIMEOUT_S", 660)
         self.jpeg_quality = _int("ENHANCE_JPEG_QUALITY", 95)
         self.result_ttl_s = _int("ENHANCE_RESULT_TTL_S", 3600)

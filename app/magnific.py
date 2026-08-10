@@ -66,8 +66,13 @@ def _ssl_context() -> ssl.SSLContext:
         return ssl.create_default_context()
 
 
-def _call(url: str, payload: Optional[dict] = None, attempts: int = 2) -> dict:
-    """POST (payload) или GET. Один ретрай: сетевые сбои и 5xx у внешнего API — норма."""
+def _call(url: str, payload: Optional[dict] = None, attempts: int = 3) -> dict:
+    """POST (payload) или GET.
+
+    Ретраим сетевые сбои, 5xx и отдельно 429: при нескольких воркерах всплеск опросов может
+    упереться в лимит Magnific (50 запросов/мин на ключ), и это лечится ожиданием, а не отказом.
+    Остальные 4xx — ошибка запроса, повтор бесполезен.
+    """
     data = json.dumps(payload).encode() if payload is not None else None
     last_error = ""
     for attempt in range(attempts):
@@ -81,12 +86,18 @@ def _call(url: str, payload: Optional[dict] = None, attempts: int = 2) -> dict:
         except urllib.error.HTTPError as e:
             body = e.read().decode(errors="replace")[:200]
             last_error = f"HTTP {e.code}: {body}"
-            if e.code < 500:  # 4xx не лечится повтором
+            if e.code == 429:
+                # Retry-After в секундах, если сервер его прислал; иначе окно лимита — минута.
+                delay = int(e.headers.get("Retry-After") or 0) or 20 * (attempt + 1)
+                log.warning("rate limited by magnific, sleeping %ss", delay)
+                time.sleep(min(delay, 60))
+                continue
+            if e.code < 500:  # прочие 4xx не лечится повтором
                 break
         except (urllib.error.URLError, TimeoutError) as e:
             last_error = f"network: {e}"
         if attempt + 1 < attempts:
-            time.sleep(2)
+            time.sleep(2 * (attempt + 1))
     raise MagnificError(f"{url.rsplit('/', 1)[-1]} -> {last_error}")
 
 

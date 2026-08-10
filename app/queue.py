@@ -1,6 +1,8 @@
-"""Single-worker bounded job queue (hard backstop for the codex box).
+"""Bounded job queue (hard backstop for the box).
 
-One job processed at a time (the codex box is the bottleneck). Bounded queue -> 429 when full.
+Число воркеров зависит от провайдера (settings.workers): для local это 1 — ncnn упирается в CPU
+и параллель только душит соседей по боксу; для magnific воркеры почти всё время ждут сеть,
+поэтому их несколько. Bounded queue -> 429 when full.
 Jobs/state live in memory; book-editor owns the durable queue (contract C3).
 """
 import logging
@@ -9,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Full, Queue
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from . import engine, magnific
 from .config import settings
@@ -41,10 +43,11 @@ class JobManager:
         self._jobs: Dict[str, Job] = {}
         self._lock = threading.Lock()
         self._queue: "Queue[str]" = Queue(maxsize=settings.queue_max)
-        self._active: Optional[str] = None
+        self._active: Set[str] = set()
         self._stats = {"total": 0, "done": 0, "error": 0}
         self._durations: List[float] = []
-        threading.Thread(target=self._run, daemon=True, name="enhance-worker").start()
+        for i in range(max(1, settings.workers)):
+            threading.Thread(target=self._run, daemon=True, name=f"enhance-worker-{i}").start()
         threading.Thread(target=self._sweep, daemon=True, name="enhance-sweeper").start()
 
     # ---- public API -------------------------------------------------------
@@ -65,8 +68,9 @@ class JobManager:
 
     @property
     def busy(self) -> bool:
+        """True, когда свободных воркеров не осталось."""
         with self._lock:
-            return self._active is not None
+            return len(self._active) >= max(1, settings.workers)
 
     def queue_len(self) -> int:
         return self._queue.qsize()
@@ -79,7 +83,9 @@ class JobManager:
             return {
                 **self._stats,
                 "queue_len": self.queue_len(),
-                "busy": self._active is not None,
+                "workers": max(1, settings.workers),
+                "active": len(self._active),
+                "busy": len(self._active) >= max(1, settings.workers),
                 "avg_s": avg,
                 "p95_s": p95,
             }
@@ -92,12 +98,12 @@ class JobManager:
             if job is None:
                 continue
             with self._lock:
-                self._active = job_id
+                self._active.add(job_id)
             try:
                 self._process(job)
             finally:
                 with self._lock:
-                    self._active = None
+                    self._active.discard(job_id)
 
     def _process(self, job: Job) -> None:
         t0 = time.time()

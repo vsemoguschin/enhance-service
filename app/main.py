@@ -141,7 +141,16 @@ def _startup() -> None:
     if settings.provider == "magnific":
         if not settings.magnific_api_key:
             log.warning("MAGNIFIC_API_KEY missing — jobs will fail")
-        log.info("magnific: preset=%s upscale=%s", settings.magnific_preset, settings.magnific_upscale)
+        log.info("magnific: preset=%s upscale=%s workers=%d",
+                 settings.magnific_preset, settings.magnific_upscale, settings.workers)
+        # Опрос статуса ест тот же лимит, что и постановка задач. Если конфиг выводит нас
+        # за 50 запросов/мин, Magnific начнёт отвечать 429 — лучше узнать это на старте.
+        per_job = 1 + (30 / max(1, settings.magnific_poll_s))  # ~30с на генерацию
+        per_min = settings.workers * 2 * per_job
+        log.info("magnific: оценка нагрузки на API ~%d запросов/мин (лимит 50)", round(per_min))
+        if per_min > 45:
+            log.warning("magnific: конфиг близок к лимиту API — увеличьте MAGNIFIC_POLL_S "
+                        "или уменьшите ENHANCE_WORKERS")
         return
     log.info("engine: bin=%s model=%s", settings.ncnn_bin, settings.model_param_path())
     if not Path(settings.ncnn_bin).exists():
