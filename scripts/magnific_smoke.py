@@ -49,12 +49,23 @@ ENGINES = {
     "seedream-edit": "/v1/ai/text-to-image/seedream-v4-5-edit",
 }
 
-# Промпт из веб-версии — чтобы сравнение с ней было на равных.
-SEEDREAM_PROMPT = (
-    "подготовь это фото к профессиональной печати, улучши качество максимально без потери "
-    "сходства, сделай цветокоррекцию, чтобы фото не было темным, разрешение 4к, сделай так, "
-    "чтобы фото было четким и не смазанным. сделай фото четким"
-)
+PROMPTS = {
+    # Промпт из веб-версии — чтобы сравнение с ней было на равных.
+    "web": (
+        "подготовь это фото к профессиональной печати, улучши качество максимально без потери "
+        "сходства, сделай цветокоррекцию, чтобы фото не было темным, разрешение 4к, сделай так, "
+        "чтобы фото было четким и не смазанным. сделай фото четким"
+    ),
+    # Под фотокнигу: главное — сходство лиц, поэтому запреты сформулированы явно.
+    "restore": (
+        "Восстанови это фото для печати в фотокниге. Убери размытие, шум и артефакты сжатия. "
+        "Верни естественную детализацию кожи, волос, ткани и фона. "
+        "СОХРАНИ без изменений черты лиц, пропорции, выражения, возраст и все детали одежды "
+        "и аксессуаров. Сохрани композицию кадра, естественный свет и цвета сцены. "
+        "Резкость естественная, без пластиковой кожи, без перерисовки лиц, без добавления "
+        "новых объектов и без косметической ретуши."
+    ),
+}
 
 
 def load_env_key(name: str) -> str:
@@ -149,7 +160,7 @@ def build_payload(args: argparse.Namespace, image_b64: str) -> dict:
     """Тела запросов у creative и precision разные — общий только image."""
     if args.engine == "seedream-edit":
         payload = {
-            "prompt": args.prompt or SEEDREAM_PROMPT,
+            "prompt": args.prompt or PROMPTS[args.preset],
             "reference_images": [image_b64],
             "aspect_ratio": args.aspect_ratio,
         }
@@ -207,7 +218,13 @@ def main() -> int:
     p.add_argument("--hdr", type=int, default=0)
     p.add_argument("--resemblance", type=int, default=5, help="+ = ближе к оригиналу")
     p.add_argument("--fractality", type=int, default=0)
-    p.add_argument("--prompt", default="", help="для seedream-edit; пусто = промпт из веб-версии")
+    p.add_argument("--prompt", default="", help="для seedream-edit; пусто = промпт пресета")
+    p.add_argument(
+        "--preset",
+        choices=sorted(PROMPTS),
+        default="restore",
+        help="готовый промпт: restore (фотокнига, сходство лиц) | web (как в веб-версии)",
+    )
     p.add_argument(
         "--aspect-ratio",
         default="traditional_3_4",
@@ -242,7 +259,7 @@ def main() -> int:
     dims = image_dims(args.image)
     scale_num = float(str(args.scale).rstrip("x"))
     if args.engine == "seedream-edit":
-        print(f"промпт:  {(args.prompt or SEEDREAM_PROMPT)[:80]}…")
+        print(f"промпт:  [{args.preset}] {(args.prompt or PROMPTS[args.preset])[:70]}…")
         print(f"формат:  {args.aspect_ratio}, выход до 4 Мп (задаёт модель)")
     elif dims:
         w, h = dims
@@ -294,7 +311,11 @@ def main() -> int:
         return print(f"COMPLETED, но пустой generated[]: {json.dumps(body, ensure_ascii=False)[:400]}") or 1
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    suffix = args.engine if args.engine == "seedream-edit" else f"{args.engine}_x{str(args.scale).rstrip('x')}"
+    suffix = (
+        f"{args.engine}-{args.preset}"
+        if args.engine == "seedream-edit"
+        else f"{args.engine}_x{str(args.scale).rstrip('x')}"
+    )
     out_path = OUT_DIR / f"{args.image.stem}_{suffix}.jpg"
     with urllib.request.urlopen(generated[0], timeout=300, context=ssl_context()) as resp:
         out_path.write_bytes(resp.read())

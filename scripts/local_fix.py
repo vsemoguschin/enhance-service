@@ -39,6 +39,11 @@ def main() -> int:
         help="принудительный доворот; обычно НЕ нужен — EXIF-ориентация применяется сама",
     )
     p.add_argument("--cutoff", type=float, default=0.5, help="процент отсечки для автоуровней")
+    p.add_argument(
+        "--no-wb",
+        action="store_true",
+        help="без баланса белого — для кадров с намеренным цветом сцены (закат, лампы)",
+    )
     p.add_argument("--saturation", type=float, default=1.15)
     p.add_argument("--sharpen", type=float, default=1.3, help="сила unsharp mask, 1.0 = выкл")
     args = p.parse_args()
@@ -53,7 +58,8 @@ def main() -> int:
         im = im.rotate(args.rotate, expand=True)
 
     im = ImageOps.autocontrast(im, cutoff=args.cutoff)
-    im = gray_world_white_balance(im)
+    if not args.no_wb:
+        im = gray_world_white_balance(im)
     if args.saturation != 1.0:
         im = ImageEnhance.Color(im).enhance(args.saturation)
     if args.sharpen != 1.0:
