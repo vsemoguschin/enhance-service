@@ -44,7 +44,17 @@ ENGINES = {
     "precision-v2": "/v1/ai/image-upscaler-precision-v2",
     "precision": "/v1/ai/image-upscaler-precision",
     "creative": "/v1/ai/image-upscaler",
+    # Генеративное восстановление: не увеличивает, а перерисовывает кадр по промпту.
+    # В вебе владелец пользуется Seedream 5 pro, в API доступен 4.5 — результат может отличаться.
+    "seedream-edit": "/v1/ai/text-to-image/seedream-v4-5-edit",
 }
+
+# Промпт из веб-версии — чтобы сравнение с ней было на равных.
+SEEDREAM_PROMPT = (
+    "подготовь это фото к профессиональной печати, улучши качество максимально без потери "
+    "сходства, сделай цветокоррекцию, чтобы фото не было темным, разрешение 4к, сделай так, "
+    "чтобы фото было четким и не смазанным. сделай фото четким"
+)
 
 
 def load_env_key(name: str) -> str:
@@ -137,6 +147,16 @@ def show_quota_headers(headers: dict, label: str) -> None:
 
 def build_payload(args: argparse.Namespace, image_b64: str) -> dict:
     """Тела запросов у creative и precision разные — общий только image."""
+    if args.engine == "seedream-edit":
+        payload = {
+            "prompt": args.prompt or SEEDREAM_PROMPT,
+            "reference_images": [image_b64],
+            "aspect_ratio": args.aspect_ratio,
+        }
+        if args.seed is not None:
+            payload["seed"] = args.seed
+        return payload
+
     if args.engine == "creative":
         payload = {
             "image": image_b64,
@@ -187,7 +207,14 @@ def main() -> int:
     p.add_argument("--hdr", type=int, default=0)
     p.add_argument("--resemblance", type=int, default=5, help="+ = ближе к оригиналу")
     p.add_argument("--fractality", type=int, default=0)
-    p.add_argument("--prompt", default="")
+    p.add_argument("--prompt", default="", help="для seedream-edit; пусто = промпт из веб-версии")
+    p.add_argument(
+        "--aspect-ratio",
+        default="traditional_3_4",
+        dest="aspect_ratio",
+        help="seedream-edit: square_1_1 / traditional_3_4 / classic_4_3 / portrait_2_3 / standard_3_2 …",
+    )
+    p.add_argument("--seed", type=int, default=None, help="seedream-edit: фиксирует результат")
     args = p.parse_args()
 
     if not args.image.is_file():
@@ -211,9 +238,13 @@ def main() -> int:
     print(f"движок:  {args.engine}, scale={args.scale}")
 
     # Считаем площадь результата до отправки: превышение лимита = 400 и сожжённое время.
+    # У seedream-edit масштаба нет — разрешение выхода выбирает модель (до 4 Мп).
     dims = image_dims(args.image)
     scale_num = float(str(args.scale).rstrip("x"))
-    if dims:
+    if args.engine == "seedream-edit":
+        print(f"промпт:  {(args.prompt or SEEDREAM_PROMPT)[:80]}…")
+        print(f"формат:  {args.aspect_ratio}, выход до 4 Мп (задаёт модель)")
+    elif dims:
         w, h = dims
         out_mp = w * h * scale_num**2 / 1e6
         print(f"печать:  оригинал при 300 DPI — {w / 300 * 2.54:.0f}x{h / 300 * 2.54:.0f} см")
@@ -263,7 +294,8 @@ def main() -> int:
         return print(f"COMPLETED, но пустой generated[]: {json.dumps(body, ensure_ascii=False)[:400]}") or 1
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUT_DIR / f"{args.image.stem}_{args.engine}_x{str(args.scale).rstrip('x')}.jpg"
+    suffix = args.engine if args.engine == "seedream-edit" else f"{args.engine}_x{str(args.scale).rstrip('x')}"
+    out_path = OUT_DIR / f"{args.image.stem}_{suffix}.jpg"
     with urllib.request.urlopen(generated[0], timeout=300, context=ssl_context()) as resp:
         out_path.write_bytes(resp.read())
 
