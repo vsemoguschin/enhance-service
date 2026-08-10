@@ -64,6 +64,9 @@ def _run_codex(in_path: Path, out_path: Path, workdir: Path) -> None:
             text=True,
             timeout=settings.codex_timeout_s,
             cwd=str(workdir),
+            # Без этого codex ждёт инструкции из stdin и висит до таймаута:
+            # промпт передан аргументом, читать ему нечего.
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired as e:
         raise CodexError(f"codex exec не уложился в {settings.codex_timeout_s}с") from e
