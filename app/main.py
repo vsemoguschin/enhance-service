@@ -7,6 +7,7 @@ GET  /health, GET /metrics
 Auth: header X-Enhance-Api-Key (skipped if ENHANCE_API_KEY unset — dev only).
 """
 import logging
+import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -33,7 +34,11 @@ def auth(x_enhance_api_key: str = Header(default="")) -> None:
 
 @app.get("/health")
 def health() -> dict:
-    if settings.provider == "magnific":
+    if settings.provider == "codex":
+        ready = bool(shutil.which(settings.codex_bin))
+        engine_info = {"cli": ready, "preset": settings.codex_preset,
+                       "timeout_s": settings.codex_timeout_s}
+    elif settings.provider == "magnific":
         # Ключ не печатаем — только факт наличия.
         ready = bool(settings.magnific_api_key)
         engine_info = {"key": ready, "preset": settings.magnific_preset,
@@ -138,6 +143,14 @@ def enhance_result(job_id: str, _: None = Depends(auth)) -> FileResponse:
 @app.on_event("startup")
 def _startup() -> None:
     log.info("enhance-service starting: provider=%s work=%s", settings.provider, settings.work_dir)
+    if settings.provider == "codex":
+        found = shutil.which(settings.codex_bin)
+        log.info("codex: bin=%s preset=%s workers=%d timeout=%ss",
+                 found or "НЕ НАЙДЕН", settings.codex_preset, settings.workers,
+                 settings.codex_timeout_s)
+        if not found:
+            log.warning("codex CLI не найден — задайте CODEX_BIN (полный путь)")
+        return
     if settings.provider == "magnific":
         if not settings.magnific_api_key:
             log.warning("MAGNIFIC_API_KEY missing — jobs will fail")

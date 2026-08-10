@@ -21,9 +21,18 @@ class Settings:
         # Auth: empty = disabled (dev only). In prod set a real secret.
         self.api_key = os.getenv("ENHANCE_API_KEY", "")
 
-        # Провайдер движка: local (ncnn Real-ESRGAN на своём железе) | magnific (внешний API).
-        # На боксе без GPU рабочий вариант — magnific: компьют уходит наружу.
+        # Провайдер движка:
+        #   local    — ncnn Real-ESRGAN на своём железе (без GPU непригоден);
+        #   magnific — внешний API, ~25с и ~4.6 ₽ за фото, но пересобирает панорамы;
+        #   codex    — Codex CLI с встроенным imagegen: лучшее качество из проверенных,
+        #              ~106с, оплата подпиской (без кредитов за вызов).
         self.provider = os.getenv("ENHANCE_PROVIDER", "local").strip().lower()
+
+        # Codex
+        self.codex_bin = os.getenv("CODEX_BIN", "codex").strip()
+        self.codex_preset = os.getenv("CODEX_PRESET", "texture").strip()
+        # Один прогон ~106с; запас на очередь внутри агента и повторные попытки.
+        self.codex_timeout_s = _int("CODEX_TIMEOUT_S", 280)
 
         # Magnific (значения — только из окружения, в git не попадают)
         self.magnific_api_key = os.getenv("MAGNIFIC_API_KEY", "").strip()
@@ -67,7 +76,10 @@ class Settings:
         # magnific: 4 — воркер почти всё время ждёт сеть, но упирается в rate limit Magnific
         # (50 запросов/мин на ключ). Одна задача ≈ 1 POST + ~5 опросов за ~30с, то есть
         # 4 воркера ≈ 48 запросов/мин. Больше — и API начнёт отвечать нам 429.
-        self.workers = _int("ENHANCE_WORKERS", 4 if self.provider == "magnific" else 1)
+        # codex: каждый прогон — отдельный node-процесс рядом с ai-assistant на боксе
+        # с 2 ядрами и 1 ГБ RAM, поэтому по умолчанию один.
+        default_workers = 4 if self.provider == "magnific" else 1
+        self.workers = _int("ENHANCE_WORKERS", default_workers)
         self.job_timeout_s = _int("ENHANCE_JOB_TIMEOUT_S", 660)
         self.jpeg_quality = _int("ENHANCE_JPEG_QUALITY", 95)
         self.result_ttl_s = _int("ENHANCE_RESULT_TTL_S", 3600)

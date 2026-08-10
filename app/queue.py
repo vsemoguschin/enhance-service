@@ -13,10 +13,13 @@ from pathlib import Path
 from queue import Full, Queue
 from typing import Dict, List, Optional, Set
 
-from . import engine, magnific
+from . import codex_provider, engine, magnific
 from .config import settings
 
 log = logging.getLogger("enhance.queue")
+
+# Все провайдеры реализуют одну сигнатуру enhance(), поэтому контракт C1 от выбора не зависит.
+PROVIDERS = {"local": engine, "magnific": magnific, "codex": codex_provider}
 
 
 @dataclass
@@ -114,7 +117,7 @@ class JobManager:
                 job.progress = 10 + int(pct * 0.8)  # map ncnn 0-100 -> 10-90
                 job.message = f"upscaling {int(pct)}%"
 
-            provider = magnific if settings.provider == "magnific" else engine
+            provider = PROVIDERS.get(settings.provider, engine)
             w, h = provider.enhance(
                 job.input_path, job.output_path,
                 job.target_w, job.target_h, job.scale_cap, job.face_restore, cb,
