@@ -101,6 +101,18 @@ def load_env_key(name: str) -> str:
     return ""
 
 
+def estimate_credits(engine: str, out_mp: float) -> str:
+    """Прикидка расхода по замерам кабинета: апскейлеры тарифицируются по площади результата.
+
+    Замеры: precision 3 Мп ≈ 90, 14.7 Мп ≈ 270; creative 7.8 Мп ≈ 200, 14.7 Мп ≈ 400;
+    seedream и nano-banana — по 50 независимо от размера.
+    """
+    if engine in ("seedream-edit", "nano-banana"):
+        return "~50 кредитов"
+    per_mp = 26 if engine == "creative" else 18
+    return f"~{round(out_mp * per_mp / 10) * 10} кредитов (оценка)"
+
+
 def image_dims(path: Path) -> tuple[int, int] | None:
     """WxH через Pillow, если он есть."""
     try:
@@ -290,12 +302,15 @@ def main() -> int:
     if args.engine in ("seedream-edit", "nano-banana"):
         print(f"промпт:  [{args.preset}] {(args.prompt or PROMPTS[args.preset])[:70]}…")
         ratio = args.aspect_ratio if args.engine == "seedream-edit" else "как у входа"
-        print(f"формат:  {ratio}, разрешение выхода задаёт модель")
+        print(f"формат:  {ratio}, разрешение выхода задаёт модель · {estimate_credits(args.engine, 0)}")
     elif dims:
         w, h = dims
         out_mp = w * h * scale_num**2 / 1e6
         print(f"печать:  оригинал при 300 DPI — {w / 300 * 2.54:.0f}x{h / 300 * 2.54:.0f} см")
-        print(f"выход:   ~{int(w * scale_num)}x{int(h * scale_num)} ({out_mp:.1f} Мп)")
+        print(
+            f"выход:   ~{int(w * scale_num)}x{int(h * scale_num)} ({out_mp:.1f} Мп)"
+            f" · {estimate_credits(args.engine, out_mp)}"
+        )
         if out_mp > MAX_OUTPUT_MP:
             max_scale = (MAX_OUTPUT_MP * 1e6 / (w * h)) ** 0.5
             print(
