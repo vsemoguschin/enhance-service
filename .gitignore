@@ -15,6 +15,10 @@ gfpgan/
 realesrgan-ncnn-vulkan
 *.zip
 
+# Секреты (в git только .env.example)
+.env
+.env.local
+
 # Кэши/temp
 pip-tmp/
 .cache/
