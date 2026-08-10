@@ -4,10 +4,16 @@ AI-улучшение (апскейл) изображений для EASY-CRM. �
 картинка на вход → улучшенная на выход. Деплой на **codex**-бокс. Используется
 book-editor'ом через async-API (контракт **C1**).
 
-**Статус:** реализовано и **задеплоено на codex** (pm2, `/health` ок, доступ с crm есть, smoke на codex проходит).
-В book-editor фича пока **выключена** флагом `ENHANCE_ENABLED=false` — на codex нет GPU, апскейл слишком
-медленный (минуты/фото на llvmpipe). Для прода нужен GPU-бокс или внешний API — см.
-[docs/operations.md](docs/operations.md).
+**Статус:** задеплоено на codex. С 2026-08-10 у сервиса **два провайдера**:
+
+- `ENHANCE_PROVIDER=local` — ncnn Real-ESRGAN на своём железе. Без GPU непригоден
+  (минуты на фото, см. [docs/operations.md](docs/operations.md));
+- `ENHANCE_PROVIDER=magnific` — внешний API (Seedream 4.5 edit). Компьют уходит наружу,
+  **боксу GPU не нужен**: ~25 с и 4.6 ₽ за фото, выход ~4 Мп. Контракт C1 не меняется —
+  book-editor работает с обоими одинаково. Замеры и выбор промпта —
+  [docs/audits/2026-08-10-magnific-api-test.md](docs/audits/2026-08-10-magnific-api-test.md).
+
+Это снимает причину, по которой фича была выключена в book-editor (`ENHANCE_ENABLED=false`).
 
 ## Роль в системе
 

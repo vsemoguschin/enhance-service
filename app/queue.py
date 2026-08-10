@@ -11,7 +11,7 @@ from pathlib import Path
 from queue import Full, Queue
 from typing import Dict, List, Optional
 
-from . import engine
+from . import engine, magnific
 from .config import settings
 
 log = logging.getLogger("enhance.queue")
@@ -108,7 +108,8 @@ class JobManager:
                 job.progress = 10 + int(pct * 0.8)  # map ncnn 0-100 -> 10-90
                 job.message = f"upscaling {int(pct)}%"
 
-            w, h = engine.enhance(
+            provider = magnific if settings.provider == "magnific" else engine
+            w, h = provider.enhance(
                 job.input_path, job.output_path,
                 job.target_w, job.target_h, job.scale_cap, job.face_restore, cb,
             )

@@ -4,3 +4,5 @@ python-multipart
 opencv-python-headless
 numpy<2
 pillow
+# корневые сертификаты для вызовов Magnific API (у python.org-сборок на macOS их нет)
+certifi

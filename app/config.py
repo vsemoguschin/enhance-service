@@ -10,12 +10,31 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _bool(name: str, default: bool) -> bool:
+    return os.getenv(name, str(default)).strip().lower() not in ("false", "0", "no", "")
+
+
 class Settings:
     def __init__(self) -> None:
         base = Path(__file__).resolve().parent.parent
 
         # Auth: empty = disabled (dev only). In prod set a real secret.
         self.api_key = os.getenv("ENHANCE_API_KEY", "")
+
+        # Провайдер движка: local (ncnn Real-ESRGAN на своём железе) | magnific (внешний API).
+        # На боксе без GPU рабочий вариант — magnific: компьют уходит наружу.
+        self.provider = os.getenv("ENHANCE_PROVIDER", "local").strip().lower()
+
+        # Magnific (значения — только из окружения, в git не попадают)
+        self.magnific_api_key = os.getenv("MAGNIFIC_API_KEY", "").strip()
+        self.magnific_base_url = os.getenv("MAGNIFIC_BASE_URL", "https://api.magnific.com").strip()
+        self.magnific_preset = os.getenv("MAGNIFIC_PRESET", "texture").strip()
+        self.magnific_preset_fallback = "texture"
+        self.magnific_timeout_s = _int("MAGNIFIC_TIMEOUT_S", 300)
+        self.magnific_poll_s = _int("MAGNIFIC_POLL_S", 3)
+        # Апскейл тарифицируется по площади результата — по умолчанию выключен.
+        self.magnific_upscale = _bool("MAGNIFIC_UPSCALE", False)
+        self.magnific_autocontrast = _bool("MAGNIFIC_AUTOCONTRAST", True)
 
         # Engine
         self.ncnn_bin = os.getenv("ENHANCE_NCNN_BIN", str(base / "bin" / "realesrgan-ncnn-vulkan"))

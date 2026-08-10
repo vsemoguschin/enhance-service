@@ -33,15 +33,24 @@ def auth(x_enhance_api_key: str = Header(default="")) -> None:
 
 @app.get("/health")
 def health() -> dict:
-    bin_ok = Path(settings.ncnn_bin).exists()
-    model_ok = settings.model_param_path().exists()
+    if settings.provider == "magnific":
+        # Ключ не печатаем — только факт наличия.
+        ready = bool(settings.magnific_api_key)
+        engine_info = {"key": ready, "preset": settings.magnific_preset,
+                       "upscale": settings.magnific_upscale}
+    else:
+        bin_ok = Path(settings.ncnn_bin).exists()
+        model_ok = settings.model_param_path().exists()
+        ready = bin_ok and model_ok
+        engine_info = {"bin": bin_ok, "model": model_ok}
     return {
-        "status": "ok" if (bin_ok and model_ok) else "degraded",
+        "status": "ok" if ready else "degraded",
         "version": app.version,
+        "provider": settings.provider,
         "busy": manager.busy,
         "queue_len": manager.queue_len(),
         "gfpgan": False,
-        "engine": {"bin": bin_ok, "model": model_ok},
+        "engine": engine_info,
     }
 
 
@@ -128,8 +137,13 @@ def enhance_result(job_id: str, _: None = Depends(auth)) -> FileResponse:
 
 @app.on_event("startup")
 def _startup() -> None:
-    log.info("enhance-service starting: bin=%s model=%s work=%s",
-             settings.ncnn_bin, settings.model_param_path(), settings.work_dir)
+    log.info("enhance-service starting: provider=%s work=%s", settings.provider, settings.work_dir)
+    if settings.provider == "magnific":
+        if not settings.magnific_api_key:
+            log.warning("MAGNIFIC_API_KEY missing — jobs will fail")
+        log.info("magnific: preset=%s upscale=%s", settings.magnific_preset, settings.magnific_upscale)
+        return
+    log.info("engine: bin=%s model=%s", settings.ncnn_bin, settings.model_param_path())
     if not Path(settings.ncnn_bin).exists():
         log.warning("ncnn binary missing — run scripts/download_models.sh")
     if not settings.model_param_path().exists():
