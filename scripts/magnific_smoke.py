@@ -16,6 +16,7 @@ import argparse
 import base64
 import json
 import os
+import ssl
 import sys
 import time
 import urllib.error
@@ -24,6 +25,19 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 OUT_DIR = BASE_DIR / "work" / "magnific"
+
+# Документированный потолок Magnific на площадь результата.
+MAX_OUTPUT_MP = 25.3
+
+
+def ssl_context() -> ssl.SSLContext:
+    """У python.org-сборок на macOS нет системных корневых сертификатов — берём certifi, если есть."""
+    try:
+        import certifi  # noqa: PLC0415 — опциональная зависимость
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
 
 # path — куда слать POST; статус читается тем же path + /{task_id}
 ENGINES = {
@@ -51,17 +65,46 @@ def load_env_key(name: str) -> str:
     return ""
 
 
-def image_size(path: Path) -> str:
-    """WxH через Pillow, если он есть; иначе пусто — размер не критичен для теста."""
+def image_dims(path: Path) -> tuple[int, int] | None:
+    """WxH через Pillow, если он есть."""
     try:
         from PIL import Image  # noqa: PLC0415 — опциональная зависимость
     except ImportError:
-        return "?"
+        return None
     try:
         with Image.open(path) as im:
-            return f"{im.width}x{im.height} ({im.width * im.height / 1e6:.1f} Мп)"
+            return im.width, im.height
     except Exception:
+        return None
+
+
+def image_size(path: Path) -> str:
+    dims = image_dims(path)
+    if not dims:
         return "?"
+    w, h = dims
+    return f"{w}x{h} ({w * h / 1e6:.1f} Мп)"
+
+
+def make_downscaled(path: Path, long_side: int) -> Path:
+    """Уменьшенная копия — эмуляция типичного low-DPI кадра клиента.
+
+    Оригинал при этом становится эталоном: видно, насколько апскейл к нему приблизился.
+    """
+    try:
+        from PIL import Image  # noqa: PLC0415 — опциональная зависимость
+    except ImportError:
+        raise SystemExit("--downscale требует Pillow (pip install pillow)") from None
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = OUT_DIR / f"{path.stem}_src{long_side}.jpg"
+    with Image.open(path) as im:
+        im = im.convert("RGB")
+        ratio = long_side / max(im.width, im.height)
+        im.resize((round(im.width * ratio), round(im.height * ratio)), Image.LANCZOS).save(
+            out_path, quality=90
+        )
+    return out_path
 
 
 def api_call(url: str, api_key: str, payload: dict | None = None) -> tuple[dict, dict]:
@@ -72,7 +115,7 @@ def api_call(url: str, api_key: str, payload: dict | None = None) -> tuple[dict,
     if data:
         req.add_header("content-type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=120, context=ssl_context()) as resp:
             return json.loads(resp.read().decode()), dict(resp.headers)
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")[:500]
@@ -123,8 +166,16 @@ def main() -> int:
     p.add_argument("image", type=Path, help="путь к исходному фото")
     p.add_argument("--engine", choices=sorted(ENGINES), default=os.getenv("MAGNIFIC_ENGINE", "precision-v2"))
     p.add_argument("--scale", default="4", help="2/4/8/16 (creative принимает и '4x')")
+    p.add_argument(
+        "--downscale",
+        type=int,
+        default=0,
+        help="сначала уменьшить фото до N px по длинной стороне и апскейлить уже копию; "
+        "оригинал остаётся эталоном для сравнения (например: --downscale 1000 --scale 4)",
+    )
     p.add_argument("--timeout", type=int, default=int(os.getenv("MAGNIFIC_TIMEOUT_S", "300")))
     p.add_argument("--poll", type=float, default=3.0, help="интервал опроса статуса, сек")
+    p.add_argument("--verbose", action="store_true", help="печатать полные ответы API (без base64)")
     # precision
     p.add_argument("--flavor", choices=["sublime", "photo", "photo_denoiser"], default="photo")
     p.add_argument("--sharpen", type=int, default=7)
@@ -148,10 +199,33 @@ def main() -> int:
 
     base_url = (os.getenv("MAGNIFIC_BASE_URL") or "https://api.magnific.com").rstrip("/")
     endpoint = base_url + ENGINES[args.engine]
+
+    if args.downscale:
+        original = args.image
+        args.image = make_downscaled(original, args.downscale)
+        print(f"эталон:  {original.name} — {image_size(original)} (с ним сравниваем результат)")
+
     src_bytes = args.image.read_bytes()
 
     print(f"вход:    {args.image.name} — {len(src_bytes) / 1024:.0f} КБ, {image_size(args.image)}")
     print(f"движок:  {args.engine}, scale={args.scale}")
+
+    # Считаем площадь результата до отправки: превышение лимита = 400 и сожжённое время.
+    dims = image_dims(args.image)
+    scale_num = float(str(args.scale).rstrip("x"))
+    if dims:
+        w, h = dims
+        out_mp = w * h * scale_num**2 / 1e6
+        print(f"печать:  оригинал при 300 DPI — {w / 300 * 2.54:.0f}x{h / 300 * 2.54:.0f} см")
+        print(f"выход:   ~{int(w * scale_num)}x{int(h * scale_num)} ({out_mp:.1f} Мп)")
+        if out_mp > MAX_OUTPUT_MP:
+            max_scale = (MAX_OUTPUT_MP * 1e6 / (w * h)) ** 0.5
+            print(
+                f"\nСТОП: лимит Magnific — {MAX_OUTPUT_MP} Мп на результат, здесь {out_mp:.1f} Мп.\n"
+                f"Максимум для этого фото: --scale {max_scale:.2f}"
+                + ("  (то есть апскейл ему уже не нужен)" if max_scale < 1.5 else "")
+            )
+            return 2
 
     started = time.monotonic()
     body, headers = api_call(endpoint, api_key, build_payload(args, base64.b64encode(src_bytes).decode()))
@@ -159,6 +233,8 @@ def main() -> int:
     if not task_id:
         return print(f"нет task_id в ответе: {json.dumps(body)[:300]}") or 1
     print(f"task_id: {task_id} (принят за {time.monotonic() - started:.1f}с)")
+    if args.verbose:
+        print(f"  ответ POST: {json.dumps(body, ensure_ascii=False)[:600]}")
     show_quota_headers(headers, "квоты после POST")
 
     deadline = started + args.timeout
@@ -180,13 +256,15 @@ def main() -> int:
         return print(f"таймаут {args.timeout}с, последний статус: {status or 'нет'}") or 1
 
     elapsed = time.monotonic() - started
-    if not generated:
-        return print("COMPLETED, но пустой generated[]") or 1
-
     show_quota_headers(headers, "квоты после COMPLETED")
+    if args.verbose:
+        print(f"  ответ COMPLETED: {json.dumps(body, ensure_ascii=False)[:600]}")
+    if not generated:
+        return print(f"COMPLETED, но пустой generated[]: {json.dumps(body, ensure_ascii=False)[:400]}") or 1
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUT_DIR / f"{args.image.stem}_{args.engine}_x{str(args.scale).rstrip('x')}.jpg"
-    with urllib.request.urlopen(generated[0], timeout=300) as resp:
+    with urllib.request.urlopen(generated[0], timeout=300, context=ssl_context()) as resp:
         out_path.write_bytes(resp.read())
 
     print(f"\nготово за {elapsed:.1f}с")
