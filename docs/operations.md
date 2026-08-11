@@ -52,6 +52,38 @@ ncnn-бинарь с моделями не требуется (`/health` их н
 больше не страдает. Тайминги: восстановление ~25 с; апскейл (`MAGNIFIC_UPSCALE=true`) добавляет
 ~130 с и деньги по площади результата, поэтому по умолчанию выключен.
 
+## Провайдер codex — AppArmor и sandbox (2026-08-11)
+
+`ENHANCE_PROVIDER=codex` использует Codex CLI, который на Linux изолирует свои shell-вызовы
+через **bubblewrap**. На Ubuntu 24.04 AppArmor по умолчанию запрещает unprivileged user
+namespaces (`kernel.apparmor_restrict_unprivileged_userns=1`), из-за чего bwrap падает:
+
+```
+bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted
+bwrap: setting up uid map: Permission denied
+```
+
+Агент при этом **не может даже прочитать входной файл** и отвечает `FAIL` — генерация не стартует.
+Ровно та же причина ломала попытки использовать codex как ИИ-менеджера.
+
+**Решение (применено на боксе):** точечный профиль `/etc/apparmor.d/codex-bwrap` с правом `userns`
+для двух бинарей — системного `/usr/bin/bwrap` и vendored внутри Codex CLI. Глобальный sysctl
+**не** трогали: защита остальной системы сохранена.
+
+```bash
+# проверка после ребута или обновления codex:
+sudo aa-status | grep codex          # должны быть codex-bwrap и codex-vendor-bwrap
+/usr/bin/bwrap --unshare-all --dev-bind / / /bin/true && echo sandbox OK
+```
+
+Файл в `/etc/apparmor.d/` подхватывается при старте службы apparmor, то есть переживает ребут.
+Путь vendored-бинаря в профиле задан через `*` по архитектуре — обновление Codex CLI его не сломает,
+но **переустановка в другой каталог сломает**: тогда профиль надо поправить.
+
+Замеры на боксе (2 ядра, 1 ГБ RAM): чистая генерация ~79 с, полный цикл C1 ~131 с,
+23.5 тыс. токенов подписки на прогон, память в пике ~600 МБ из 1000. Один воркер —
+это ~27 фото/час. Кредиты Magnific при этом не расходуются.
+
 ## Известные TODO
 - Таймаут+kill для ncnn-subprocess (иначе зависший job держит единственный воркер) — см. [architecture.md](architecture.md).
 - ~~Выбор движка для прода: GPU-бокс vs внешний API~~ — выбран внешний API (magnific).

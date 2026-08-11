@@ -116,6 +116,30 @@ curl -s -o /tmp/out.jpg localhost:8011/enhance/result/<job_id> -H "X-Enhance-Api
 ```
 Ожидается: `done` за ~25 с, на выходе JPEG с **той же пропорцией**, что у входа (инвариант сервиса).
 
+## 2c. Переключение на провайдера codex (2026-08-11)
+
+Оплата подпиской вместо кредитов, качество лучшее из проверенных, но медленнее (~130 с на фото)
+и один воркер. Требует рабочего sandbox — см. AppArmor в [operations.md](operations.md).
+
+```bash
+# 1. Разово, root на боксе: профиль AppArmor для bwrap (иначе агент отвечает FAIL)
+#    файл /etc/apparmor.d/codex-bwrap уже создан; проверка:
+sudo aa-status | grep codex
+
+# 2. В .env сервиса:
+#    ENHANCE_PROVIDER=codex
+#    CODEX_BIN=/opt/codex/.npm-global/bin/codex   (полный путь: PATH pm2 не содержит npm-global)
+#    CODEX_PRESET=identity
+pm2 restart enhance-service --update-env
+curl -s localhost:8011/health   # ожидается provider=codex, engine.cli=true
+
+# 3. В book-editor на crm поднять ожидание: генерация ~130 с против дефолтных 180 с — впритык.
+#    ENHANCE_MAX_WAIT_MS=300000
+pm2 restart book-editor-backend --update-env
+```
+
+Откат на Magnific — одна строка: `ENHANCE_PROVIDER=magnific` + рестарт.
+
 ## 4. Постепенная раскатка
 1. `ENHANCE_ENABLED=true` (pm2 restart --update-env) — сперва для себя/узкой группы.
 2. End-to-end: улучшить фото → создан вариант `enhanced` в file-platform → экспорт PDF/ZIP использует enhanced.
