@@ -9,6 +9,34 @@ docs/audits/2026-08-10-magnific-api-test.md.
 """
 
 PROMPTS = {
+    # Структура подсмотрена у Codex CLI: его imagegen оборачивает задачу в поля
+    # (use case, subject, composition, avoid) — и именно он единственный не разрушил
+    # групповой кадр. Ключевое отличие от сплошного текста: явный identity-preserve,
+    # раздельные поля вместо абзаца и длинный перечень запретов.
+    "identity": (
+        "Use case: identity-preserve\n"
+        "Asset type: enhanced personal photograph for print\n"
+        "Primary request: restore this photo for printing while keeping photographic texture. "
+        "Preserve and emphasise micro-texture: skin pores and relief, individual hairs and strands, "
+        "fabric weave and knit, foliage and background detail. Do NOT smooth skin, do NOT apply "
+        "beauty retouching, blur or denoising, do NOT create plastic or waxy surfaces, do not "
+        "remove wrinkles or moles. Keep natural grain and micro-contrast, sharpness like a good lens.\n"
+        "Input images: Image 1: edit target; preserve every person and the original photograph\n"
+        "Scene/backdrop: original scene, background, architecture and objects, unchanged\n"
+        "Subject: same people, same identity, facial features, expressions, age, pose, "
+        "clothing and accessories\n"
+        "Style/medium: realistic photographic restoration and enhancement\n"
+        "Composition/framing: preserve the exact original composition, perspective, scale and crop; "
+        "do not add or remove people or objects; do not zoom or re-frame\n"
+        "Lighting/mood: preserve the original light of the scene\n"
+        "Color palette: preserve natural original colors; no dramatic grading\n"
+        "Constraints: change only image clarity, detail and print readiness; keep people and scene "
+        "content unchanged\n"
+        "Avoid: beauty retouching, plastic skin, face repainting, altered facial proportions or "
+        "expression, changed hairstyle, changed clothing, added hats or accessories, invented "
+        "details, new people, removed people, new objects, crop changes, re-framing, text, "
+        "watermark, blur, denoising artifacts"
+    ),
     # Дефолт прода: принят владельцем и на низкорес-селфи, и на скане старого отпечатка.
     "texture": (
         "Восстанови это фото для печати, сохранив фотографическую фактуру. "

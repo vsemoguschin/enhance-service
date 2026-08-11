@@ -37,8 +37,10 @@ class Settings:
         # Magnific (значения — только из окружения, в git не попадают)
         self.magnific_api_key = os.getenv("MAGNIFIC_API_KEY", "").strip()
         self.magnific_base_url = os.getenv("MAGNIFIC_BASE_URL", "https://api.magnific.com").strip()
-        self.magnific_preset = os.getenv("MAGNIFIC_PRESET", "texture").strip()
-        self.magnific_preset_fallback = "texture"
+        # identity — структурированный промпт по образцу Codex CLI: на селфи он, в отличие
+        # от texture, не перерисовал фон и точнее сохранил черты лица.
+        self.magnific_preset = os.getenv("MAGNIFIC_PRESET", "identity").strip()
+        self.magnific_preset_fallback = "identity"
         # Меньше, чем ENHANCE_MAX_WAIT_MS у book-editor (180с): сервис должен сдаваться раньше
         # клиента, иначе кредиты тратятся на результат, который уже некому забрать.
         self.magnific_timeout_s = _int("MAGNIFIC_TIMEOUT_S", 150)
