@@ -78,9 +78,11 @@ class Settings:
         # magnific: 4 — воркер почти всё время ждёт сеть, но упирается в rate limit Magnific
         # (50 запросов/мин на ключ). Одна задача ≈ 1 POST + ~5 опросов за ~30с, то есть
         # 4 воркера ≈ 48 запросов/мин. Больше — и API начнёт отвечать нам 429.
-        # codex: каждый прогон — отдельный node-процесс рядом с ai-assistant на боксе
-        # с 2 ядрами и 1 ГБ RAM, поэтому по умолчанию один.
-        default_workers = 4 if self.provider == "magnific" else 1
+        # codex: каждый прогон — отдельный node-процесс, но он почти всё время ждёт сеть.
+        # Замер на боксе (2 ядра, 2 ГБ): три параллельных прогона заняли 97с, съели ~115 МБ
+        # на всех троих (общие библиотеки) и дали load 0.49 из 2.0 — запас большой.
+        # Ставим 3 консервативно: раньше ресурсов упрутся лимиты подписки OpenAI.
+        default_workers = {"magnific": 4, "codex": 3}.get(self.provider, 1)
         self.workers = _int("ENHANCE_WORKERS", default_workers)
         self.job_timeout_s = _int("ENHANCE_JOB_TIMEOUT_S", 660)
         self.jpeg_quality = _int("ENHANCE_JPEG_QUALITY", 95)
