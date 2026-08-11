@@ -72,6 +72,8 @@ Vulkan ICD (`apt-get install -y libvulkan1 mesa-vulkan-drivers`) — прове�
 
 ## Документация
 
+- [docs/providers.md](docs/providers.md) — **что стоит на проде и почему**: сравнение провайдеров,
+  лимиты, гейт на генерацию, промпты, эксплуатация.
 - [docs/architecture.md](docs/architecture.md) — архитектура: C1, движок (EXIF/aspect/ncnn), очередь, конфиг.
 - [docs/operations.md](docs/operations.md) — эксплуатация на codex: топология, перф/GPU-решение, egress-замок, мониторинг.
 - [docs/deploy-runbook.md](docs/deploy-runbook.md) — пошаговый деплой 3 сервисов.
