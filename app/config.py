@@ -30,9 +30,16 @@ class Settings:
 
         # Codex
         self.codex_bin = os.getenv("CODEX_BIN", "codex").strip()
-        self.codex_preset = os.getenv("CODEX_PRESET", "texture").strip()
-        # Один прогон ~106с; запас на очередь внутри агента и повторные попытки.
-        self.codex_timeout_s = _int("CODEX_TIMEOUT_S", 280)
+        self.codex_preset = os.getenv("CODEX_PRESET", "identity").strip()
+        # Прогон ~130с. Держим меньше, чем ждёт book-editor, и с запасом на fallback:
+        # 150с codex + ~30с magnific укладываются в 300с ожидания клиента.
+        self.codex_timeout_s = _int("CODEX_TIMEOUT_S", 150)
+
+        # Запасной провайдер, когда codex не справляется: ошибка/таймаут — или очередь
+        # разрослась и ждать ещё столько же бессмысленно. Пусто = fallback выключен.
+        self.enhance_fallback = os.getenv("ENHANCE_FALLBACK", "magnific").strip().lower()
+        # Сколько задача может пролежать в очереди, прежде чем её отдадут быстрому провайдеру.
+        self.fallback_after_wait_s = _int("ENHANCE_FALLBACK_AFTER_WAIT_S", 60)
 
         # Magnific (значения — только из окружения, в git не попадают)
         self.magnific_api_key = os.getenv("MAGNIFIC_API_KEY", "").strip()

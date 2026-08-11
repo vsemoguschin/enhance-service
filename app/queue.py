@@ -108,6 +108,30 @@ class JobManager:
                 with self._lock:
                     self._active.discard(job_id)
 
+    def _plan(self, job: Job) -> List[tuple]:
+        """Кого звать: основной провайдер и запасной.
+
+        Запасной нужен, потому что codex даёт лучшее качество, но он медленный и живёт
+        на подписке: любая его ошибка или разросшаяся очередь не должны оставлять
+        пользователя без результата — тогда доделывает magnific.
+        """
+        primary = PROVIDERS.get(settings.provider, engine)
+        plan = [(settings.provider, primary)]
+
+        fallback = PROVIDERS.get(settings.enhance_fallback)
+        if not fallback or fallback is primary:
+            return plan
+
+        waited = time.time() - job.created
+        if settings.fallback_after_wait_s and waited > settings.fallback_after_wait_s:
+            # Задача уже отстояла очередь — ждать ещё столько же бессмысленно.
+            log.info("job %s ждал %.0fс в очереди -> сразу %s",
+                     job.id, waited, settings.enhance_fallback)
+            return [(settings.enhance_fallback, fallback)]
+
+        plan.append((settings.enhance_fallback, fallback))
+        return plan
+
     def _process(self, job: Job) -> None:
         t0 = time.time()
         try:
@@ -117,11 +141,23 @@ class JobManager:
                 job.progress = 10 + int(pct * 0.8)  # map ncnn 0-100 -> 10-90
                 job.message = f"upscaling {int(pct)}%"
 
-            provider = PROVIDERS.get(settings.provider, engine)
-            w, h = provider.enhance(
-                job.input_path, job.output_path,
-                job.target_w, job.target_h, job.scale_cap, job.face_restore, cb,
-            )
+            plan = self._plan(job)
+            last_error: Optional[Exception] = None
+            w = h = None
+            for name, provider in plan:
+                try:
+                    job.message = f"processing ({name})"
+                    w, h = provider.enhance(
+                        job.input_path, job.output_path,
+                        job.target_w, job.target_h, job.scale_cap, job.face_restore, cb,
+                    )
+                    last_error = None
+                    break
+                except Exception as e:  # noqa: BLE001 — падение провайдера не должно терять джоб
+                    last_error = e
+                    log.warning("job %s: провайдер %s упал (%s)", job.id, name, str(e)[:200])
+            if last_error is not None or w is None:
+                raise last_error or RuntimeError("no provider produced a result")
             job.width, job.height = w, h
             job.status, job.progress, job.message = "done", 100, "done"
             with self._lock:
