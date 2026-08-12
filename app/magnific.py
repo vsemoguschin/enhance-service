@@ -57,6 +57,29 @@ class MagnificError(Exception):
     pass
 
 
+class Deadline:
+    """Общий срок на всю задачу, а не на отдельный вызов.
+
+    Без него таймауты складывались: три попытки по 120с в `_call` плюс паузы давали до шести
+    минут на один запрос, а цикл опроса проверял срок только между итерациями. При обрыве сети
+    (инцидент 2026-08-12) задача висела 10–15 минут вместо заявленных 150с, воркер не отпускал
+    слот, и очередь вставала до ручного перезапуска.
+    """
+
+    def __init__(self, seconds: float) -> None:
+        self.at = time.monotonic() + max(1.0, seconds)
+
+    def remaining(self) -> float:
+        return max(0.0, self.at - time.monotonic())
+
+    def expired(self) -> bool:
+        return self.remaining() <= 0
+
+    def budget(self, cap: float) -> float:
+        """Сколько ждать конкретный вызов: не дольше остатка и не дольше разумного потолка."""
+        return max(1.0, min(cap, self.remaining()))
+
+
 def _ssl_context() -> ssl.SSLContext:
     try:
         import certifi  # noqa: PLC0415 — опционально: на macOS системных корней у python.org нет
@@ -66,8 +89,14 @@ def _ssl_context() -> ssl.SSLContext:
         return ssl.create_default_context()
 
 
-def _call(url: str, payload: Optional[dict] = None, attempts: int = 3) -> dict:
-    """POST (payload) или GET.
+def _call(
+    url: str,
+    deadline: Deadline,
+    payload: Optional[dict] = None,
+    attempts: int = 3,
+    cap: float = 60.0,
+) -> dict:
+    """POST (payload) или GET, но не дольше общего срока задачи.
 
     Ретраим сетевые сбои, 5xx и отдельно 429: при нескольких воркерах всплеск опросов может
     упереться в лимит Magnific (50 запросов/мин на ключ), и это лечится ожиданием, а не отказом.
@@ -76,12 +105,17 @@ def _call(url: str, payload: Optional[dict] = None, attempts: int = 3) -> dict:
     data = json.dumps(payload).encode() if payload is not None else None
     last_error = ""
     for attempt in range(attempts):
+        if deadline.expired():
+            raise MagnificError(f"{url.rsplit('/', 1)[-1]} -> дедлайн задачи истёк ({last_error})")
+
         req = urllib.request.Request(url, data=data, method="POST" if data else "GET")
         req.add_header("x-magnific-api-key", settings.magnific_api_key)
         if data:
             req.add_header("content-type", "application/json")
         try:
-            with urllib.request.urlopen(req, timeout=120, context=_ssl_context()) as resp:
+            with urllib.request.urlopen(
+                req, timeout=deadline.budget(cap), context=_ssl_context()
+            ) as resp:
                 return json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             body = e.read().decode(errors="replace")[:200]
@@ -89,39 +123,57 @@ def _call(url: str, payload: Optional[dict] = None, attempts: int = 3) -> dict:
             if e.code == 429:
                 # Retry-After в секундах, если сервер его прислал; иначе окно лимита — минута.
                 delay = int(e.headers.get("Retry-After") or 0) or 20 * (attempt + 1)
-                log.warning("rate limited by magnific, sleeping %ss", delay)
-                time.sleep(min(delay, 60))
+                pause = min(delay, 60, deadline.remaining())
+                if pause <= 0:
+                    break
+                log.warning("rate limited by magnific, sleeping %ss", round(pause))
+                time.sleep(pause)
                 continue
             if e.code < 500:  # прочие 4xx не лечится повтором
                 break
         except (urllib.error.URLError, TimeoutError) as e:
             last_error = f"network: {e}"
         if attempt + 1 < attempts:
-            time.sleep(2 * (attempt + 1))
+            time.sleep(min(2 * (attempt + 1), deadline.remaining()))
     raise MagnificError(f"{url.rsplit('/', 1)[-1]} -> {last_error}")
 
 
-def _run_task(path: str, payload: dict, progress_cb, lo: int, hi: int) -> bytes:
-    """Ставит задачу, ждёт COMPLETED, возвращает байты результата."""
+def _run_task(
+    path: str,
+    payload: dict,
+    progress_cb,
+    lo: int,
+    hi: int,
+    deadline: Optional[Deadline] = None,
+) -> bytes:
+    """Ставит задачу, ждёт COMPLETED, возвращает байты результата — в пределах общего срока."""
     base = settings.magnific_base_url.rstrip("/")
-    body = _call(base + path, payload)
+    total = float(settings.magnific_timeout_s)
+    deadline = deadline or Deadline(total)
+
+    # Отправка картинки тяжелее опроса статуса, поэтому потолок на неё выше.
+    body = _call(base + path, deadline, payload, cap=90.0)
     task_id = (body.get("data") or {}).get("task_id")
     if not task_id:
         raise MagnificError(f"no task_id in response: {json.dumps(body)[:200]}")
 
-    deadline = time.time() + settings.magnific_timeout_s
-    while time.time() < deadline:
-        time.sleep(settings.magnific_poll_s)
-        data = (_call(f"{base}{path}/{task_id}").get("data") or {})
+    while not deadline.expired():
+        time.sleep(min(settings.magnific_poll_s, deadline.remaining()))
+        if deadline.expired():
+            break
+        data = (_call(f"{base}{path}/{task_id}", deadline, cap=30.0).get("data") or {})
         status = data.get("status", "")
         if progress_cb:
-            elapsed = settings.magnific_timeout_s - (deadline - time.time())
-            progress_cb(lo + (hi - lo) * min(0.95, elapsed / settings.magnific_timeout_s))
+            done_share = 1.0 - (deadline.remaining() / total)
+            progress_cb(lo + (hi - lo) * min(0.95, max(0.0, done_share)))
         if status == "COMPLETED":
             urls = data.get("generated") or []
             if not urls:
                 raise MagnificError("COMPLETED with empty generated[]")
-            with urllib.request.urlopen(urls[0], timeout=180, context=_ssl_context()) as resp:
+            # Скачивание тоже внутри срока: иначе зависший CDN держал бы воркер как раньше.
+            with urllib.request.urlopen(
+                urls[0], timeout=deadline.budget(90.0), context=_ssl_context()
+            ) as resp:
                 return resp.read()
         if status == "FAILED":
             raise MagnificError(f"task failed: {json.dumps(data)[:200]}")

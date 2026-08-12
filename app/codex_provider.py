@@ -14,7 +14,9 @@ workspace-write и видит только свой каталог задачи.
 отдельный node-процесс рядом с ai-assistant.
 """
 import logging
+import os
 import shutil
+import signal
 import subprocess
 import tempfile
 from pathlib import Path
@@ -31,6 +33,18 @@ log = logging.getLogger("enhance.codex")
 
 class CodexError(Exception):
     pass
+
+
+def _kill_process_group(proc: "subprocess.Popen") -> None:
+    """Снимает всю группу процессов агента, а не только родителя."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError) as e:
+        log.warning("codex: не удалось снять группу процессов (%s), убиваем родителя", e)
+        try:
+            proc.kill()
+        except OSError:
+            pass
 
 
 def _build_prompt(in_path: Path, out_path: Path) -> str:
@@ -57,29 +71,41 @@ def _run_codex(in_path: Path, out_path: Path, workdir: Path) -> None:
         _build_prompt(in_path, out_path),
     ]
     log.info("codex exec: старт (таймаут %sс)", settings.codex_timeout_s)
+    # Своя группа процессов: при таймауте subprocess убивает только родителя, а codex порождает
+    # дочерние. Уцелевшие держали бы pipe открытым, и ожидание вывода не завершалось —
+    # так воркеры зависали при обрыве сети (инцидент 2026-08-12).
     try:
-        proc = subprocess.run(  # noqa: S603 — аргументы массивом, shell не используется
+        proc = subprocess.Popen(  # noqa: S603 — аргументы массивом, shell не используется
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=settings.codex_timeout_s,
             cwd=str(workdir),
-            # Без этого codex ждёт инструкции из stdin и висит до таймаута:
-            # промпт передан аргументом, читать ему нечего.
+            # Без этого codex ждёт инструкции из stdin: промпт передан аргументом, читать нечего.
             stdin=subprocess.DEVNULL,
+            start_new_session=True,
         )
-    except subprocess.TimeoutExpired as e:
-        raise CodexError(f"codex exec не уложился в {settings.codex_timeout_s}с") from e
     except FileNotFoundError as e:
         raise CodexError(f"codex не найден: {settings.codex_bin}") from e
 
+    try:
+        stdout, stderr = proc.communicate(timeout=settings.codex_timeout_s)
+    except subprocess.TimeoutExpired as e:
+        _kill_process_group(proc)
+        # Второй раз ждём коротко: группа уже убита, но pipe нужно закрыть.
+        try:
+            proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            log.warning("codex: группа процессов не закрыла вывод после kill")
+        raise CodexError(f"codex exec не уложился в {settings.codex_timeout_s}с") from e
+
     if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip()[-300:]
+        tail = (stderr or stdout or "").strip()[-300:]
         raise CodexError(f"codex exec вернул {proc.returncode}: {tail}")
 
     if not out_path.exists() or out_path.stat().st_size == 0:
         # Агент мог «поговорить» вместо работы — показываем хвост, чтобы это было видно в логе.
-        tail = (proc.stdout or "").strip()[-300:]
+        tail = (stdout or "").strip()[-300:]
         raise CodexError(f"codex не создал файл результата. Хвост вывода: {tail}")
 
 
