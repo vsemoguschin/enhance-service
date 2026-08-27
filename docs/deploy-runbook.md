@@ -129,16 +129,24 @@ sudo aa-status | grep codex
 # 2. В .env сервиса:
 #    ENHANCE_PROVIDER=codex
 #    CODEX_BIN=/opt/codex/.npm-global/bin/codex   (полный путь: PATH pm2 не содержит npm-global)
-#    CODEX_PRESET=identity
+#    CODEX_PRESET=preserve        # fallback-пресет для single-reference
+#    CODEX_MULTI_REFERENCE=true
+#    CODEX_REFERENCE_MAX_PX=4096
+#    CODEX_TIMEOUT_S=240
+#    FINISH_DETAIL=true
+#    FINISH_DETAIL_AMOUNT=0.25
+#    FINISH_MICRO_CONTRAST=0.0
+#    FINISH_SHARPEN_AMOUNT=0.20
 pm2 restart enhance-service --update-env
-curl -s localhost:8011/health   # ожидается provider=codex, engine.cli=true
+curl -s localhost:8011/health   # engine.cli=true, multi_reference=true, timeout_s=240
 
 # 3. В book-editor на crm поднять ожидание: генерация ~130 с против дефолтных 180 с — впритык.
 #    ENHANCE_MAX_WAIT_MS=300000
 pm2 restart book-editor-backend --update-env
 ```
 
-Откат на Magnific — одна строка: `ENHANCE_PROVIDER=magnific` + рестарт.
+Откат только multi-reference — `CODEX_MULTI_REFERENCE=false` + рестарт. Полный откат на
+Magnific — `ENHANCE_PROVIDER=magnific` + рестарт.
 
 ## 4. Постепенная раскатка
 1. `ENHANCE_ENABLED=true` (pm2 restart --update-env) — сперва для себя/узкой группы.

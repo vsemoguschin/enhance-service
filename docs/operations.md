@@ -84,6 +84,30 @@ sudo aa-status | grep codex          # должны быть codex-bwrap и code
 23.5 тыс. токенов подписки на прогон, память в пике ~600 МБ из 1000. Один воркер —
 это ~27 фото/час. Кредиты Magnific при этом не расходуются.
 
+### Multi-reference и мягкий финиш (2026-08-27)
+
+Один `codex exec` передаёт imagegen три изображения с разными ролями: оригинал, локально
+проявленные тени и локально усиленную фактуру. Генерируется один результат. Встроенный CLI
+не показывает точный usage для этого вызова; суммарное число входных пикселей на тестовой
+выборке выросло примерно втрое. Контрольные вызовы заняли 104–165 с.
+
+Production-настройки:
+
+```text
+CODEX_MULTI_REFERENCE=true
+CODEX_REFERENCE_MAX_PX=4096
+CODEX_TIMEOUT_S=240
+FINISH_DETAIL=true
+FINISH_DETAIL_AMOUNT=0.25
+FINISH_MICRO_CONTRAST=0.0
+FINISH_SHARPEN_AMOUNT=0.20
+```
+
+`CODEX_REFERENCE_MAX_PX` ограничивает только две локальные подсказки, чтобы Retinex не
+выбил память на разрешённом входе 80 Мп. Оригинал остаётся полноразмерным. Быстрый откат
+качества без смены провайдера: `CODEX_MULTI_REFERENCE=false` и restart с `--update-env`.
+Состояние видно в `/health`: `multi_reference`, `reference_max_px`, `finish`, `timeout_s`.
+
 ## Инцидент 2026-08-12: обрыв внешней сети и зависшая очередь
 
 **Симптом.** `/health` отвечает, но `active=3`, `queue_len` растёт, `done` не меняется, при этом
