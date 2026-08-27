@@ -23,10 +23,10 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import cv2
-import numpy as np
 
+from . import finish
 from .config import settings
-from .prompts import PROMPTS
+from .prompts import CODEX_MULTI_REFERENCE_PROMPT, PROMPTS
 
 log = logging.getLogger("enhance.codex")
 
@@ -47,19 +47,41 @@ def _kill_process_group(proc: "subprocess.Popen") -> None:
             pass
 
 
-def _build_prompt(in_path: Path, out_path: Path) -> str:
+def _build_prompt(
+    in_path: Path,
+    out_path: Path,
+    shadow_path: Optional[Path] = None,
+    detail_path: Optional[Path] = None,
+) -> str:
     """Инструкция агенту: одна задача, фиксированный путь результата, короткий ответ."""
-    preset = PROMPTS.get(settings.codex_preset) or PROMPTS["texture"]
+    if shadow_path is not None and detail_path is not None:
+        references = (
+            "Передай imagegen эти exact referenced_image_paths строго в таком порядке:\n"
+            f"1. {in_path} — authoritative original;\n"
+            f"2. {shadow_path} — shadow-detail reference only;\n"
+            f"3. {detail_path} — edge-and-texture reference only.\n"
+        )
+        enhancement_prompt = CODEX_MULTI_REFERENCE_PROMPT
+    else:
+        references = f"Передай imagegen один edit target: {in_path}.\n"
+        enhancement_prompt = PROMPTS.get(settings.codex_preset) or PROMPTS["texture"]
     return (
-        f"Улучши изображение {in_path} с помощью skill imagegen.\n"
-        f"Промпт для улучшения: «{preset}»\n"
+        "Улучши фотографию с помощью skill imagegen. Вызови imagegen ровно один раз.\n"
+        f"{references}"
+        f"Промпт для imagegen: «{enhancement_prompt}»\n"
         f"Сохрани результат СТРОГО в файл {out_path} (скопируй туда сгенерированный файл).\n"
         "Не выполняй никаких других задач, не меняй другие файлы, не задавай вопросов.\n"
         "В финальном ответе напиши только OK или FAIL."
     )
 
 
-def _run_codex(in_path: Path, out_path: Path, workdir: Path) -> None:
+def _run_codex(
+    in_path: Path,
+    out_path: Path,
+    workdir: Path,
+    shadow_path: Optional[Path] = None,
+    detail_path: Optional[Path] = None,
+) -> None:
     cmd = [
         settings.codex_bin,
         "exec",
@@ -68,7 +90,7 @@ def _run_codex(in_path: Path, out_path: Path, workdir: Path) -> None:
         "-s",
         "workspace-write",
         "--skip-git-repo-check",
-        _build_prompt(in_path, out_path),
+        _build_prompt(in_path, out_path, shadow_path, detail_path),
     ]
     log.info("codex exec: старт (таймаут %sс)", settings.codex_timeout_s)
     # Своя группа процессов: при таймауте subprocess убивает только родителя, а codex порождает
@@ -138,9 +160,29 @@ def enhance(
         # EXIF уже применён при чтении — на диск кладём нормализованный кадр.
         cv2.imwrite(str(in_path), img)
 
+        shadow_path = None
+        detail_path = None
+        if settings.codex_multi_reference:
+            reference_source = img
+            longest = max(img.shape[1], img.shape[0])
+            if longest > settings.codex_reference_max_px:
+                scale = settings.codex_reference_max_px / longest
+                reference_source = cv2.resize(
+                    img,
+                    (round(img.shape[1] * scale), round(img.shape[0] * scale)),
+                    interpolation=cv2.INTER_AREA,
+                )
+            shadow, detail = finish.codex_reference_variants(reference_source)
+            shadow_path = workdir / "in-shadow.png"
+            detail_path = workdir / "in-detail.png"
+            if not cv2.imwrite(str(shadow_path), shadow):
+                raise CodexError("не удалось записать shadow-reference")
+            if not cv2.imwrite(str(detail_path), detail):
+                raise CodexError("не удалось записать detail-reference")
+
         if progress_cb:
             progress_cb(15)
-        _run_codex(in_path, out_path, workdir)
+        _run_codex(in_path, out_path, workdir, shadow_path, detail_path)
         if progress_cb:
             progress_cb(85)
 
@@ -170,8 +212,20 @@ def enhance(
             out, (round(out.shape[1] * s), round(out.shape[0] * s)), interpolation=cv2.INTER_AREA
         )
 
+    # Чёткость модель не добавляет — под запретами она возвращает копию входа, поэтому
+    # детализацию делаем сами, по уже готовому кадру. См. app/finish.py.
+    out = finish.detail_finish(out)
+
     if progress_cb:
         progress_cb(95)
     w, h = engine._write_jpeg_capped(out, Path(output_path))
-    log.info("codex done: %dx%d -> %dx%d", orig_w, orig_h, w, h)
+    log.info(
+        "codex done: %dx%d -> %dx%d (multi_ref=%s, finish=%s)",
+        orig_w,
+        orig_h,
+        w,
+        h,
+        settings.codex_multi_reference,
+        settings.finish_detail,
+    )
     return w, h

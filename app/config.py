@@ -10,6 +10,13 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
 def _bool(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).strip().lower() not in ("false", "0", "no", "")
 
@@ -31,9 +38,17 @@ class Settings:
         # Codex
         self.codex_bin = os.getenv("CODEX_BIN", "codex").strip()
         self.codex_preset = os.getenv("CODEX_PRESET", "identity").strip()
-        # Прогон ~130с. Держим меньше, чем ждёт book-editor, и с запасом на fallback:
-        # 150с codex + ~30с magnific укладываются в 300с ожидания клиента.
-        self.codex_timeout_s = _int("CODEX_TIMEOUT_S", 150)
+        # Три роли для одного вызова imagegen: оригинал — геометрия/цвет, локально
+        # осветлённый кадр — тени, сильный локальный финиш — фактура. Владелец выбрал
+        # этот маршрут 27.08 на группе, селфи и панораме. Флаг оставляет быстрый откат.
+        self.codex_multi_reference = _bool("CODEX_MULTI_REFERENCE", True)
+        # Вспомогательным кадрам не нужен размер 80 Мп: imagegen использует их как
+        # подсказки, а Retinex на полном лимите входа превысил бы память AI-бокса.
+        # Authoritative original не уменьшается.
+        self.codex_reference_max_px = _int("CODEX_REFERENCE_MAX_PX", 4096)
+        # Multi-reference занимал до 165с чистой генерации. 240с оставляет около минуты
+        # до клиентского лимита 300с на быстрый fallback Magnific.
+        self.codex_timeout_s = _int("CODEX_TIMEOUT_S", 240)
 
         # Запасной провайдер, когда codex не справляется: ошибка/таймаут — или очередь
         # разрослась и ждать ещё столько же бессмысленно. Пусто = fallback выключен.
@@ -69,6 +84,23 @@ class Settings:
         self.model_dir = Path(os.getenv("ENHANCE_MODEL_DIR", str(base / "models")))
         self.model_name = os.getenv("ENHANCE_MODEL_NAME", "realesrgan-x4plus")
         self.ncnn_tile = _int("ENHANCE_NCNN_TILE", 0)  # 0 = auto
+
+        # Финиш детализации (app/finish.py). Генеративный шаг чёткости не добавляет —
+        # под запретами он возвращает копию входа, — поэтому резкость делаем сами,
+        # арифметикой по готовому кадру. Мягкие значения выбраны владельцем 27.08
+        # после сравнения на селфи и панораме.
+        self.finish_detail = _bool("FINISH_DETAIL", True)
+        self.finish_detail_amount = _float("FINISH_DETAIL_AMOUNT", 0.25)
+        self.finish_detail_sigma_color = _float("FINISH_DETAIL_SIGMA_COLOR", 24.0)
+        self.finish_detail_sigma_space = _float("FINISH_DETAIL_SIGMA_SPACE", 6.0)
+        # Обрабатывать только яркость, не трогая цвет. По каналам BGR та же сила давала
+        # +5% насыщенности, и кадр читался как «выкрученный». 21.08 включено по умолчанию.
+        self.finish_luma_only = _bool("FINISH_LUMA_ONLY", True)
+        # Multi-reference уже проявляет тени, поэтому дополнительный CLAHE выключен.
+        self.finish_micro_contrast = _float("FINISH_MICRO_CONTRAST", 0.0)
+        self.finish_sharpen_amount = _float("FINISH_SHARPEN_AMOUNT", 0.20)
+        self.finish_sharpen_radius = _float("FINISH_SHARPEN_RADIUS", 1.1)
+        self.finish_sharpen_threshold = _int("FINISH_SHARPEN_THRESHOLD", 4)
 
         # Work dir
         self.work_dir = Path(os.getenv("ENHANCE_WORK_DIR", "/tmp/enhance"))

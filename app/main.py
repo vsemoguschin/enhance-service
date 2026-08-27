@@ -36,8 +36,14 @@ def auth(x_enhance_api_key: str = Header(default="")) -> None:
 def health() -> dict:
     if settings.provider == "codex":
         ready = bool(shutil.which(settings.codex_bin))
-        engine_info = {"cli": ready, "preset": settings.codex_preset,
-                       "timeout_s": settings.codex_timeout_s}
+        engine_info = {
+            "cli": ready,
+            "preset": settings.codex_preset,
+            "multi_reference": settings.codex_multi_reference,
+            "reference_max_px": settings.codex_reference_max_px,
+            "finish": settings.finish_detail,
+            "timeout_s": settings.codex_timeout_s,
+        }
     elif settings.provider == "magnific":
         # Ключ не печатаем — только факт наличия.
         ready = bool(settings.magnific_api_key)
@@ -145,9 +151,16 @@ def _startup() -> None:
     log.info("enhance-service starting: provider=%s work=%s", settings.provider, settings.work_dir)
     if settings.provider == "codex":
         found = shutil.which(settings.codex_bin)
-        log.info("codex: bin=%s preset=%s workers=%d timeout=%ss",
-                 found or "НЕ НАЙДЕН", settings.codex_preset, settings.workers,
-                 settings.codex_timeout_s)
+        log.info(
+            "codex: bin=%s preset=%s multi_ref=%s ref_max=%d finish=%s workers=%d timeout=%ss",
+            found or "НЕ НАЙДЕН",
+            settings.codex_preset,
+            settings.codex_multi_reference,
+            settings.codex_reference_max_px,
+            settings.finish_detail,
+            settings.workers,
+            settings.codex_timeout_s,
+        )
         if not found:
             log.warning("codex CLI не найден — задайте CODEX_BIN (полный путь)")
         return
