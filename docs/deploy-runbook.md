@@ -126,6 +126,10 @@ curl -s -o /tmp/out.jpg localhost:8011/enhance/result/<job_id> -H "X-Enhance-Api
 #    файл /etc/apparmor.d/codex-bwrap уже создан; проверка:
 sudo aa-status | grep codex
 
+# 1b. После обновления ветки установить YuNet вместе со штатными моделями.
+#     Без него сервис продолжит с тремя общими references, что видно как face_model=false.
+PLATFORM=ubuntu bash scripts/download_models.sh
+
 # 2. В .env сервиса:
 #    ENHANCE_PROVIDER=codex
 #    CODEX_BIN=/opt/codex/.npm-global/bin/codex   (полный путь: PATH pm2 не содержит npm-global)

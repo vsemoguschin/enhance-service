@@ -173,6 +173,11 @@ def _startup() -> None:
         )
         if not found:
             log.warning("codex CLI не найден — задайте CODEX_BIN (полный путь)")
+        if settings.codex_face_reference and not settings.codex_face_model.is_file():
+            log.warning(
+                "codex: YuNet-модель лиц не найдена (%s), будут только общие references",
+                settings.codex_face_model,
+            )
         return
     if settings.provider == "magnific":
         if not settings.magnific_api_key:
