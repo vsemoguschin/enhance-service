@@ -8,6 +8,7 @@ PLATFORM="${PLATFORM:-ubuntu}"   # ubuntu | macos | windows
 VER="20220424"
 BASE="https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0"
 ZIP="realesrgan-ncnn-vulkan-${VER}-${PLATFORM}.zip"
+YUNET_URL="https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -24,6 +25,10 @@ mkdir -p "$DIR/bin" "$DIR/models"
 cp "$SRC/realesrgan-ncnn-vulkan" "$DIR/bin/"
 chmod +x "$DIR/bin/realesrgan-ncnn-vulkan"
 cp "$SRC/models/"*.param "$SRC/models/"*.bin "$DIR/models/"
+
+# Лёгкий официальный детектор лиц для identity-reference Codex. Если модель отсутствует,
+# runtime безопасно продолжит без face-reference, но деплой должен скачивать её штатно.
+curl -fL -o "$DIR/models/face_detection_yunet_2023mar.onnx" "$YUNET_URL"
 
 if [ "$PLATFORM" = "macos" ]; then
   xattr -cr "$DIR/bin/realesrgan-ncnn-vulkan" 2>/dev/null || true  # clear macOS quarantine

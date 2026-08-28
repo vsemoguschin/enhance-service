@@ -84,18 +84,29 @@ sudo aa-status | grep codex          # должны быть codex-bwrap и code
 23.5 тыс. токенов подписки на прогон, память в пике ~600 МБ из 1000. Один воркер —
 это ~27 фото/час. Кредиты Magnific при этом не расходуются.
 
-### Multi-reference и мягкий финиш (2026-08-27)
+### Адаптивный input, face-reference и мягкий финиш (2026-08-28)
 
-Один `codex exec` передаёт imagegen три изображения с разными ролями: оригинал, локально
-проявленные тени и локально усиленную фактуру. Генерируется один результат. Встроенный CLI
-не показывает точный usage для этого вызова; суммарное число входных пикселей на тестовой
-выборке выросло примерно втрое. Контрольные вызовы заняли 104–165 с.
+Один `codex exec` передаёт imagegen три изображения с разными ролями: основной кадр, локально
+проявленные тени и локально усиленную фактуру. Большие оригиналы уменьшаются до 2048 px только
+для основного кадра; crop лиц YuNet берётся из полного оригинала. При найденных основных лицах
+добавляется четвёртый identity-reference, при одном явно тёмном — пятый shadow-reference.
+Генерируется один результат. Встроенный CLI не показывает точный usage; лабораторные вызовы
+с 3–5 входами имели медианы 100–137 с, разброс генерации был сильнее зависимости от числа входов.
 
 Production-настройки:
 
 ```text
 CODEX_MULTI_REFERENCE=true
+CODEX_ADAPTIVE_INPUT=true
+CODEX_INPUT_DOWNSCALE_THRESHOLD_PX=2560
+CODEX_INPUT_MAX_PX=2048
 CODEX_REFERENCE_MAX_PX=4096
+CODEX_FACE_REFERENCE=true
+CODEX_FACE_MODEL=/opt/enhance-service/models/face_detection_yunet_2023mar.onnx
+CODEX_FACE_DETECT_MAX_PX=2560
+CODEX_FACE_REFERENCE_MAX_PX=1024
+CODEX_FACE_SCORE_THRESHOLD=0.85
+CODEX_FACE_RELATIVE_MIN_SCALE=0.5
 CODEX_TIMEOUT_S=240
 FINISH_DETAIL=true
 FINISH_DETAIL_AMOUNT=0.25
@@ -103,10 +114,11 @@ FINISH_MICRO_CONTRAST=0.0
 FINISH_SHARPEN_AMOUNT=0.20
 ```
 
-`CODEX_REFERENCE_MAX_PX` ограничивает только две локальные подсказки, чтобы Retinex не
-выбил память на разрешённом входе 80 Мп. Оригинал остаётся полноразмерным. Быстрый откат
-качества без смены провайдера: `CODEX_MULTI_REFERENCE=false` и restart с `--update-env`.
-Состояние видно в `/health`: `multi_reference`, `reference_max_px`, `finish`, `timeout_s`.
+YuNet-модель ставится `scripts/download_models.sh`. Если файла нет или детекция неуверенная,
+сервис не падает и отправляет прежние три references. Быстрый откат face-crop:
+`CODEX_FACE_REFERENCE=false`; адаптивного resize: `CODEX_ADAPTIVE_INPUT=false`; всего
+multi-reference: `CODEX_MULTI_REFERENCE=false`. После изменения нужен restart с `--update-env`.
+Состояние видно в `/health`, включая `adaptive_input`, `face_reference` и наличие `face_model`.
 
 ## Инцидент 2026-08-12: обрыв внешней сети и зависшая очередь
 

@@ -131,14 +131,19 @@ sudo aa-status | grep codex
 #    CODEX_BIN=/opt/codex/.npm-global/bin/codex   (полный путь: PATH pm2 не содержит npm-global)
 #    CODEX_PRESET=preserve        # fallback-пресет для single-reference
 #    CODEX_MULTI_REFERENCE=true
+#    CODEX_ADAPTIVE_INPUT=true
+#    CODEX_INPUT_DOWNSCALE_THRESHOLD_PX=2560
+#    CODEX_INPUT_MAX_PX=2048
 #    CODEX_REFERENCE_MAX_PX=4096
+#    CODEX_FACE_REFERENCE=true
+#    CODEX_FACE_MODEL=/opt/enhance-service/models/face_detection_yunet_2023mar.onnx
 #    CODEX_TIMEOUT_S=240
 #    FINISH_DETAIL=true
 #    FINISH_DETAIL_AMOUNT=0.25
 #    FINISH_MICRO_CONTRAST=0.0
 #    FINISH_SHARPEN_AMOUNT=0.20
 pm2 restart enhance-service --update-env
-curl -s localhost:8011/health   # engine.cli=true, multi_reference=true, timeout_s=240
+curl -s localhost:8011/health   # engine.cli=true, face_model=true, timeout_s=240
 
 # 3. В book-editor на crm поднять ожидание: генерация ~130 с против дефолтных 180 с — впритык.
 #    ENHANCE_MAX_WAIT_MS=300000
