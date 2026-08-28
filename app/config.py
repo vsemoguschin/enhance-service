@@ -42,10 +42,37 @@ class Settings:
         # осветлённый кадр — тени, сильный локальный финиш — фактура. Владелец выбрал
         # этот маршрут 27.08 на группе, селфи и панораме. Флаг оставляет быстрый откат.
         self.codex_multi_reference = _bool("CODEX_MULTI_REFERENCE", True)
+        # Imagegen всё равно возвращает около 1.6–2 Мп. На больших оригиналах передаём
+        # уменьшенную рабочую копию: 2048 оказался заметно детальнее LG/1024 и не хуже
+        # 2560 по стабильности. Близкие к выходу кадры оставляем пиксель-в-пиксель.
+        self.codex_adaptive_input = _bool("CODEX_ADAPTIVE_INPUT", True)
+        self.codex_input_downscale_threshold_px = _int(
+            "CODEX_INPUT_DOWNSCALE_THRESHOLD_PX", 2560
+        )
+        self.codex_input_max_px = _int("CODEX_INPUT_MAX_PX", 2048)
         # Вспомогательным кадрам не нужен размер 80 Мп: imagegen использует их как
         # подсказки, а Retinex на полном лимите входа превысил бы память AI-бокса.
-        # Authoritative original не уменьшается.
         self.codex_reference_max_px = _int("CODEX_REFERENCE_MAX_PX", 4096)
+        # Один непрерывный crop лиц строится из полноразмерного оригинала. Отдельные
+        # карточки лиц не делаем: пространственный контекст удерживает соответствие людей.
+        self.codex_face_reference = _bool("CODEX_FACE_REFERENCE", True)
+        self.codex_face_model = Path(
+            os.getenv(
+                "CODEX_FACE_MODEL",
+                str(base / "models" / "face_detection_yunet_2023mar.onnx"),
+            )
+        )
+        self.codex_face_detect_max_px = _int("CODEX_FACE_DETECT_MAX_PX", 2560)
+        self.codex_face_reference_max_px = _int("CODEX_FACE_REFERENCE_MAX_PX", 1024)
+        self.codex_face_score_threshold = _float("CODEX_FACE_SCORE_THRESHOLD", 0.85)
+        self.codex_face_min_px = _int("CODEX_FACE_MIN_PX", 20)
+        # Удаляет далёкие фоновые лица из общего crop: на контрольной панораме шесть
+        # главных лиц имеют 63–118 px, два фоновых — 25–38 px.
+        self.codex_face_relative_min_scale = _float("CODEX_FACE_RELATIVE_MIN_SCALE", 0.5)
+        self.codex_face_max_count = _int("CODEX_FACE_MAX_COUNT", 16)
+        # Пятый input разрешён только одному явно тёмному лицу. Значение — средняя
+        # яркость L (0..255) внутри детектированного лица.
+        self.codex_face_shadow_max_luma = _float("CODEX_FACE_SHADOW_MAX_LUMA", 90.0)
         # Multi-reference занимал до 165с чистой генерации. 240с оставляет около минуты
         # до клиентского лимита 300с на быстрый fallback Magnific.
         self.codex_timeout_s = _int("CODEX_TIMEOUT_S", 240)

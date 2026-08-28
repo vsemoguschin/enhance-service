@@ -25,8 +25,28 @@ CODEX_MULTI_REFERENCE_PROMPT = (
     "glasses, fabric, vegetation, architecture, and other already visible surfaces. Keep skin "
     "natural and photographic, with no beauty retouching, waxy skin, invented features, or "
     "changed identity. Retain highlights without clipping and open only useful shadow detail. "
+    "If true pixels are insufficient to resolve a small face, keep it naturally soft and "
+    "faithful instead of reconstructing eyes, pupils, eyelids, nose, lips, teeth, skin texture, "
+    "or expression. Exact likeness is more important than apparent facial sharpness. "
     "Do not add, remove, replace, crop, duplicate, or reposition anything. Output one clean, "
     "natural photograph with high micro-detail and no text or watermark."
+)
+
+CODEX_IDENTITY_REFERENCE_PROMPT = (
+    " Image 4 is one spatially continuous identity-context crop taken from Image 1 before "
+    "its working-size reduction. It is not a new person or an alternative composition. Use it "
+    "only to preserve the exact facial geometry, age, expression, gaze, hairline, identity, "
+    "clothing, and overlap of the corresponding subject or subjects. Map people by unchanged "
+    "position, clothing, overlap, and left-to-right order in Image 1. Never swap, merge, average, "
+    "transfer, or combine facial features between people, never duplicate a face, and never apply "
+    "one person's face to another person."
+)
+
+CODEX_IDENTITY_SHADOW_REFERENCE_PROMPT = (
+    " Image 5 is a processed shadow-detail version of the same identity crop, not an additional "
+    "person and not an alternative face. Use only recoverable lighting and texture cues that "
+    "agree with Image 4. Do not copy changed exposure, color, sharpening halos, noise, smoothing, "
+    "or apparent facial changes."
 )
 
 PROMPTS = {

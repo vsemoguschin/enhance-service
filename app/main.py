@@ -40,7 +40,12 @@ def health() -> dict:
             "cli": ready,
             "preset": settings.codex_preset,
             "multi_reference": settings.codex_multi_reference,
+            "adaptive_input": settings.codex_adaptive_input,
+            "input_downscale_threshold_px": settings.codex_input_downscale_threshold_px,
+            "input_max_px": settings.codex_input_max_px,
             "reference_max_px": settings.codex_reference_max_px,
+            "face_reference": settings.codex_face_reference,
+            "face_model": settings.codex_face_model.is_file(),
             "finish": settings.finish_detail,
             "timeout_s": settings.codex_timeout_s,
         }
@@ -152,17 +157,27 @@ def _startup() -> None:
     if settings.provider == "codex":
         found = shutil.which(settings.codex_bin)
         log.info(
-            "codex: bin=%s preset=%s multi_ref=%s ref_max=%d finish=%s workers=%d timeout=%ss",
+            "codex: bin=%s preset=%s multi_ref=%s adaptive_input=%s input=%d/%d "
+            "ref_max=%d face_ref=%s finish=%s workers=%d timeout=%ss",
             found or "НЕ НАЙДЕН",
             settings.codex_preset,
             settings.codex_multi_reference,
+            settings.codex_adaptive_input,
+            settings.codex_input_downscale_threshold_px,
+            settings.codex_input_max_px,
             settings.codex_reference_max_px,
+            settings.codex_face_reference,
             settings.finish_detail,
             settings.workers,
             settings.codex_timeout_s,
         )
         if not found:
             log.warning("codex CLI не найден — задайте CODEX_BIN (полный путь)")
+        if settings.codex_face_reference and not settings.codex_face_model.is_file():
+            log.warning(
+                "codex: YuNet-модель лиц не найдена (%s), будут только общие references",
+                settings.codex_face_model,
+            )
         return
     if settings.provider == "magnific":
         if not settings.magnific_api_key:
