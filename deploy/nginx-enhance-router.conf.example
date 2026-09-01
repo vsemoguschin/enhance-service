@@ -1,0 +1,57 @@
+# HTTP-level upstreams. Slots listen only on loopback; port 8014 remains the stable CRM endpoint.
+upstream enhance_slot_a {
+    server 127.0.0.1:8012;
+    keepalive 8;
+}
+
+upstream enhance_slot_b {
+    server 127.0.0.1:8013;
+    keepalive 8;
+}
+
+server {
+    listen 8014;
+    server_name _;
+    client_max_body_size 60m;
+
+    # This snippet contains exactly one proxy_pass line and is atomically switched:
+    #   proxy_pass http://enhance_slot_a;
+    # or
+    #   proxy_pass http://enhance_slot_b;
+    location = /enhance/start {
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        include /etc/nginx/snippets/enhance-active-proxy.conf;
+    }
+
+    location = /health {
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        include /etc/nginx/snippets/enhance-active-proxy.conf;
+    }
+
+    location = /metrics {
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        include /etc/nginx/snippets/enhance-active-proxy.conf;
+    }
+
+    # Job affinity survives active-slot switches because the owner is encoded in job_id.
+    location ~ ^/enhance/(?:status|result)/ej_a_[0-9a-f]{32}$ {
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_pass http://enhance_slot_a;
+    }
+
+    location ~ ^/enhance/(?:status|result)/ej_b_[0-9a-f]{32}$ {
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_pass http://enhance_slot_b;
+    }
+
+    location / {
+        return 404;
+    }
+}

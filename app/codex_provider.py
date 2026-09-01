@@ -19,6 +19,8 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import time
+import re
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
@@ -38,6 +40,18 @@ log = logging.getLogger("enhance.codex")
 
 class CodexError(Exception):
     pass
+
+
+def _safe_tail(value: str, limit: int = 300) -> str:
+    """Короткий однострочный diagnostic без управляющих кодов и credential-like значений."""
+    clean = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", value or "")
+    clean = " ".join(clean.split())
+    clean = re.sub(
+        r"(?i)(api[_-]?key|authorization|bearer|token)(\s*[:=]\s*|\s+)[^\s,;]+",
+        r"\1=***",
+        clean,
+    )
+    return clean[-limit:] or "empty output"
 
 
 def _kill_process_group(proc: "subprocess.Popen") -> None:
@@ -107,6 +121,16 @@ def _run_codex(
     identity_path: Optional[Path] = None,
     identity_shadow_path: Optional[Path] = None,
 ) -> None:
+    started = time.monotonic()
+    roles = ["original"]
+    if shadow_path is not None:
+        roles.append("shadow")
+    if detail_path is not None:
+        roles.append("detail")
+    if identity_path is not None:
+        roles.append("identity")
+    if identity_shadow_path is not None:
+        roles.append("identity-shadow")
     cmd = [
         settings.codex_bin,
         "exec",
@@ -124,7 +148,12 @@ def _run_codex(
             identity_shadow_path,
         ),
     ]
-    log.info("codex exec: старт (таймаут %sс)", settings.codex_timeout_s)
+    log.info(
+        "codex exec: старт timeout=%ss refs=%d roles=%s",
+        settings.codex_timeout_s,
+        len(roles),
+        ",".join(roles),
+    )
     # Своя группа процессов: при таймауте subprocess убивает только родителя, а codex порождает
     # дочерние. Уцелевшие держали бы pipe открытым, и ожидание вывода не завершалось —
     # так воркеры зависали при обрыве сети (инцидент 2026-08-12).
@@ -140,7 +169,7 @@ def _run_codex(
             start_new_session=True,
         )
     except FileNotFoundError as e:
-        raise CodexError(f"codex не найден: {settings.codex_bin}") from e
+        raise CodexError("stage=spawn codex executable not found") from e
 
     try:
         stdout, stderr = proc.communicate(timeout=settings.codex_timeout_s)
@@ -151,16 +180,34 @@ def _run_codex(
             proc.communicate(timeout=10)
         except subprocess.TimeoutExpired:
             log.warning("codex: группа процессов не закрыла вывод после kill")
-        raise CodexError(f"codex exec не уложился в {settings.codex_timeout_s}с") from e
+        elapsed = round(time.monotonic() - started, 1)
+        raise CodexError(
+            f"stage=timeout elapsed_s={elapsed} refs={len(roles)} roles={','.join(roles)}"
+        ) from e
 
     if proc.returncode != 0:
-        tail = (stderr or stdout or "").strip()[-300:]
-        raise CodexError(f"codex exec вернул {proc.returncode}: {tail}")
+        elapsed = round(time.monotonic() - started, 1)
+        tail = _safe_tail(stderr or stdout or "")
+        raise CodexError(
+            f"stage=exit exit_code={proc.returncode} elapsed_s={elapsed} "
+            f"refs={len(roles)} roles={','.join(roles)} reason={tail}"
+        )
 
     if not out_path.exists() or out_path.stat().st_size == 0:
-        # Агент мог «поговорить» вместо работы — показываем хвост, чтобы это было видно в логе.
-        tail = (stdout or "").strip()[-300:]
-        raise CodexError(f"codex не создал файл результата. Хвост вывода: {tail}")
+        elapsed = round(time.monotonic() - started, 1)
+        tail = _safe_tail(stdout or stderr or "")
+        raise CodexError(
+            f"stage=result-missing exit_code={proc.returncode} elapsed_s={elapsed} "
+            f"refs={len(roles)} roles={','.join(roles)} reason={tail}"
+        )
+
+    log.info(
+        "codex exec: готово elapsed_s=%.1f refs=%d roles=%s bytes=%d",
+        time.monotonic() - started,
+        len(roles),
+        ",".join(roles),
+        out_path.stat().st_size,
+    )
 
 
 FaceBox = tuple[int, int, int, int]
@@ -364,15 +411,21 @@ def enhance(
 
         if progress_cb:
             progress_cb(15)
-        _run_codex(
-            in_path,
-            out_path,
-            workdir,
-            shadow_path,
-            detail_path,
-            identity_path,
-            identity_shadow_path,
-        )
+        try:
+            _run_codex(
+                in_path,
+                out_path,
+                workdir,
+                shadow_path,
+                detail_path,
+                identity_path,
+                identity_shadow_path,
+            )
+        except CodexError as error:
+            raise CodexError(
+                f"original={orig_w}x{orig_h} "
+                f"input={primary.shape[1]}x{primary.shape[0]} {error}"
+            ) from error
         if progress_cb:
             progress_cb(85)
 
