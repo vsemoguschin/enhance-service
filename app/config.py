@@ -77,11 +77,11 @@ class Settings:
         # до клиентского лимита 300с на быстрый fallback Magnific.
         self.codex_timeout_s = _int("CODEX_TIMEOUT_S", 240)
 
-        # Запасной провайдер, когда codex не справляется: ошибка/таймаут — или очередь
-        # разрослась и ждать ещё столько же бессмысленно. Пусто = fallback выключен.
+        # Запасной провайдер, когда основной фактически завершился ошибкой/таймаутом.
+        # Пусто = fallback выключен.
         self.enhance_fallback = os.getenv("ENHANCE_FALLBACK", "magnific").strip().lower()
-        # Сколько задача может пролежать в очереди, прежде чем её отдадут быстрому провайдеру.
-        self.fallback_after_wait_s = _int("ENHANCE_FALLBACK_AFTER_WAIT_S", 60)
+        # Deprecated: старый wait-based bypass больше не используется.
+        self.fallback_after_wait_s = _int("ENHANCE_FALLBACK_AFTER_WAIT_S", 0)
 
         # Magnific (значения — только из окружения, в git не попадают)
         self.magnific_api_key = os.getenv("MAGNIFIC_API_KEY", "").strip()
@@ -132,6 +132,12 @@ class Settings:
         # Work dir
         self.work_dir = Path(os.getenv("ENHANCE_WORK_DIR", "/tmp/enhance"))
 
+        # Blue/green slot. Job id содержит слот, чтобы reverse proxy мог направить
+        # status/result в тот процесс, где job хранится в памяти. Допустимы только
+        # короткие стабильные имена: они становятся частью публичного opaque id.
+        slot = os.getenv("ENHANCE_SLOT", "a").strip().lower()
+        self.slot = slot if slot in ("a", "b") else "a"
+
         # Limits
         self.max_output_px = _int("ENHANCE_MAX_OUTPUT_PX", 7200)
         self.max_output_bytes = _int("ENHANCE_MAX_OUTPUT_MB", 20) * 1024 * 1024
@@ -150,11 +156,21 @@ class Settings:
         # Ставим 3 консервативно: раньше ресурсов упрутся лимиты подписки OpenAI.
         default_workers = {"magnific": 4, "codex": 3}.get(self.provider, 1)
         self.workers = _int("ENHANCE_WORKERS", default_workers)
+        # Два слота во время deploy не должны удваивать число внешних генераций.
+        # Файловые advisory-locks общие для процессов и освобождаются ядром при crash.
+        self.global_concurrency = _int("ENHANCE_GLOBAL_CONCURRENCY", self.workers)
+        self.global_lock_dir = Path(
+            os.getenv(
+                "ENHANCE_GLOBAL_LOCK_DIR",
+                str(self.work_dir / ".provider-locks"),
+            )
+        )
         self.job_timeout_s = _int("ENHANCE_JOB_TIMEOUT_S", 660)
         self.jpeg_quality = _int("ENHANCE_JPEG_QUALITY", 95)
         self.result_ttl_s = _int("ENHANCE_RESULT_TTL_S", 3600)
 
         self.work_dir.mkdir(parents=True, exist_ok=True)
+        self.global_lock_dir.mkdir(parents=True, exist_ok=True)
 
     def model_param_path(self) -> Path:
         return self.model_dir / f"{self.model_name}.param"

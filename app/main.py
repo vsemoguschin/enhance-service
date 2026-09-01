@@ -63,8 +63,10 @@ def health() -> dict:
         "status": "ok" if ready else "degraded",
         "version": app.version,
         "provider": settings.provider,
+        "slot": settings.slot,
         "busy": manager.busy,
         "queue_len": manager.queue_len(),
+        "draining": manager.draining,
         "gfpgan": False,
         "engine": engine_info,
     }
@@ -73,6 +75,12 @@ def health() -> dict:
 @app.get("/metrics")
 def metrics(_: None = Depends(auth)) -> dict:
     return manager.metrics()
+
+
+@app.post("/admin/drain")
+def drain(_: None = Depends(auth)) -> dict:
+    """Перестать принимать новые jobs и закончить уже принятые."""
+    return manager.drain()
 
 
 @app.post("/enhance/start")
@@ -84,7 +92,7 @@ async def enhance_start(
     scale_cap: float = Form(4.0),
     face_restore: bool = Form(False),
 ) -> dict:
-    job_id = "ej_" + uuid.uuid4().hex
+    job_id = f"ej_{settings.slot}_" + uuid.uuid4().hex
     in_path = settings.work_dir / f"{job_id}_in"
     out_path = settings.work_dir / f"{job_id}_out.jpg"
 
@@ -115,8 +123,11 @@ async def enhance_start(
         id=job_id, input_path=str(in_path), output_path=str(out_path),
         target_w=target_w, target_h=target_h, scale_cap=scale_cap, face_restore=face_restore,
     )
-    if not manager.submit(job):
+    submitted = manager.submit(job)
+    if submitted != "accepted":
         in_path.unlink(missing_ok=True)
+        if submitted == "draining":
+            raise HTTPException(status_code=503, detail="slot is draining, retry on active slot")
         raise HTTPException(status_code=429, detail="queue full, retry later")
 
     log.info("job %s queued (%dx%d, target=%sx%s)", job_id, w, h, target_w, target_h)
@@ -153,7 +164,13 @@ def enhance_result(job_id: str, _: None = Depends(auth)) -> FileResponse:
 
 @app.on_event("startup")
 def _startup() -> None:
-    log.info("enhance-service starting: provider=%s work=%s", settings.provider, settings.work_dir)
+    log.info(
+        "enhance-service starting: provider=%s slot=%s work=%s global_concurrency=%d",
+        settings.provider,
+        settings.slot,
+        settings.work_dir,
+        settings.global_concurrency,
+    )
     if settings.provider == "codex":
         found = shutil.which(settings.codex_bin)
         log.info(
