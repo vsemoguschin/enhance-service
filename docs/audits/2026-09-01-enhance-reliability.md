@@ -40,4 +40,29 @@ deployment scripts/config, `.env.example`, targeted tests и этот audit-до
 
 ## Результат
 
-Заполняется после реализации.
+- `job_id` теперь содержит slot (`ej_a_...` / `ej_b_...`); добавлен authenticated drain endpoint,
+  который закрывает приём новых задач, не прерывая принятые.
+- Wait-based bypass удалён из runtime: даже при старом env `ENHANCE_FALLBACK_AFTER_WAIT_S=60`
+  сначала вызывается Codex. Magnific вызывается только после фактической ошибки и не изменён.
+- Ошибки провайдеров накапливаются цепочкой; `Magnific 402` больше не скрывает причину Codex.
+- Диагностика Codex содержит stage, exit code, elapsed time, размеры original/working input,
+  количество/роли reference inputs и очищенный хвост ответа с редактированием credential-like
+  значений. Схема и число image references не менялись.
+- Добавлен общий для процессов файловый семафор: оба blue/green slot суммарно используют не
+  больше `ENHANCE_GLOBAL_CONCURRENCY`; locks снимаются ядром при crash.
+- `/metrics` дополнен slot/drain state, resident jobs, возрастом очереди, provider counters,
+  `last_success_at` и global provider occupancy. Добавлен внешний health probe.
+- Добавлены PM2/nginx templates, atomic active-slot switch и runbook первой миграции/обычного
+  deploy. Nginx template локально не запускался: его нужно проверить `nginx -t` на целевом хосте.
+- Добавлен отсутствовавший обязательный worktree entrypoint.
+
+Проверено:
+
+- `python -m unittest discover -s tests -v` — 15/15;
+- `python -m compileall -q app tests`;
+- `bash -n` для изменённых/новых shell scripts;
+- `node --check deploy/ecosystem.blue-green.config.cjs`;
+- `git diff --check`.
+
+Не входит в scope: переживание аварийного падения всего хоста — для него нужен внешний
+персистентный job store. Реализация подготовлена к review; merge, push и prod-deploy не выполнялись.
