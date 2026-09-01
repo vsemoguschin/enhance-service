@@ -39,13 +39,13 @@ server {
     }
 
     # Job affinity survives active-slot switches because the owner is encoded in job_id.
-    location ~ ^/enhance/(?:status|result)/ej_a_[0-9a-f]{32}$ {
+    location ~ "^/enhance/(?:status|result)/ej_a_[0-9a-f]{32}$" {
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_pass http://enhance_slot_a;
     }
 
-    location ~ ^/enhance/(?:status|result)/ej_b_[0-9a-f]{32}$ {
+    location ~ "^/enhance/(?:status|result)/ej_b_[0-9a-f]{32}$" {
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_pass http://enhance_slot_b;
