@@ -1,14 +1,19 @@
 # enhance-service — эксплуатация (codex)
 
 ## Статус
-Задеплоено и работает на codex (pm2 online, `/health` ок, доступ с crm есть, end-to-end smoke на codex проходит).
-В book-editor **выключено** флагом `ENHANCE_ENABLED=false` — из-за перфа (нет GPU, см. ниже).
+Задеплоено и работает на codex через blue/green router: active slot `a`, nginx `:8014`,
+`/health` и end-to-end Codex smoke проходят. В book-editor улучшение включено и обращается к
+стабильному router endpoint; плановый deploy больше не требует обрывать принятые задачи.
 
 ## Топология
 - **Хост:** codex (AI-бокс), публичный IP `89.191.229.110`. Сам codex за OpenVPN (remote `194.35.116.242`,
   `tun0=10.28.4.x`); весь исходящий по умолчанию идёт в VPN, кроме host-route на crm (`85.92.110.56`) через eth0.
-- **crm → codex:** по **публичному IP** `89.191.229.110:8011` (НЕ по VPN-IP — он с crm недоступен).
-- **Процесс:** pm2 `enhance-service`, `/opt/codex/enhance-service`, юзер `codex` (uid 109), слушает `0.0.0.0:8011`.
+- **crm → codex:** по **публичному IP** `89.191.229.110:8014` (НЕ по VPN-IP — он с crm недоступен).
+- **Router:** nginx слушает `0.0.0.0:8014`; новые задачи направляет в active slot, а status/result —
+  в слот из `job_id`.
+- **Процессы:** pm2 slots `enhance-service-a` / `enhance-service-b`, `/opt/codex/enhance-service`,
+  юзер `codex` (uid 109), loopback-порты `8012` / `8013`. Одновременно активен один слот; старый
+  остаётся online только до drain принятых задач.
 - **GPU:** нет → Vulkan = программный **llvmpipe** (`mesa-vulkan-drivers`). `vulkaninfo --summary` показывает llvmpipe.
 
 ## ⚠️ Перф (критично для решения о включении)
@@ -20,21 +25,40 @@
 - Доп. риск: ncnn пинит оба ядра codex → может душить **ai-assistant** (сосед по боксу). Ещё причина не гонять на codex.
 
 ## Egress-замок (uid 109) — почему важно
-- На codex OUTPUT для `uid 109` на eth0 закрыт, кроме явно разрешённых портов (ai-assistant `8090`, enhance `8011`).
+- На codex OUTPUT для `uid 109` на eth0 закрыт, кроме явно разрешённых портов (ai-assistant `8090`,
+  enhance router `8014`).
 - Для каждого нового порта, который должен **отвечать** на crm:
   `iptables -I OUTPUT 1 -d 85.92.110.56 -o eth0 -p tcp --sport <port> -m owner --uid-owner 109 -j ACCEPT`.
 - Персистентность — в OpenVPN up-script `/etc/openvpn/client/codex-new-up.sh` (рядом с 8090), переживает ребут.
 - Симптом отсутствия правила: с crm `curl .../health` = `000`, локально на codex = `200`.
 
 ## Мониторинг
-- `GET /health` (без ключа): `{ status, busy, queue_len, engine:{bin,model} }`.
-- `GET /metrics` (с ключом): очередь / тайминги / ошибки.
+- `GET /health` (без ключа): статус, slot, drain, очередь и готовность провайдера.
+- `GET /metrics` (с ключом): очередь, возраст старейшей задачи, resident jobs, provider counters,
+  `last_success_at`, global provider occupancy и состояние drain.
+- `scripts/check_service.py` проверяет health, ожидаемый slot, возраст очереди и общий лимит
+  параллельных provider-вызовов; ключ в вывод не попадает.
 - pm2: память (`--max-memory-restart 1200M`), число рестартов; следить за **рестартами ai-assistant** (сосед).
-- Post-deploy smoke: на codex локально `POST /enhance/start` тестовым JPEG → `done` → `/result` 4x; с crm — `/health` = 200.
+- Post-deploy smoke: через router `POST /enhance/start` тестовым JPEG → `done` → `/result`; отдельно
+  проверить, что `job_id` содержит active slot и `/metrics` не показывает очередь после завершения.
 
 ## Деплой / обновление
-- Пошагово: [deploy-runbook.md](deploy-runbook.md).
+- Blue/green порядок без потери jobs: [blue-green-deploy.md](blue-green-deploy.md).
+- Общая установка и провайдеры: [deploy-runbook.md](deploy-runbook.md).
 - Краткая шпаргалка (хост, структура, egress, обновление): `1/#deploy&launch/enhance-service.md`.
+
+## Надёжность очереди и fallback (с 2026-09-01)
+
+- Ожидание в очереди не является ошибкой провайдера: Codex вызывается первым независимо от
+  `queued_for_s`. Magnific используется только после фактической ошибки или таймаута Codex.
+- Если оба провайдера завершились ошибкой, job хранит безопасную цепочку причин; ошибка Magnific
+  не затирает первичную диагностику Codex.
+- Два blue/green slot разделяют файловый семафор. Суммарное число provider-вызовов ограничено
+  `ENHANCE_GLOBAL_CONCURRENCY=3`; kernel освобождает lock при аварийном завершении процесса.
+- Job state остаётся в памяти owning slot. Drain сохраняет принятые задачи при плановом deploy,
+  но аварийная потеря всего хоста всё ещё потеряет resident jobs; для этого нужен внешний job store.
+- Диагностика Codex фиксирует этап, длительность, код завершения, размеры рабочего входа и роли
+  references. Потенциальные credentials редактируются перед сохранением и выдачей.
 
 ## Провайдер magnific (с 2026-08-10)
 
@@ -154,6 +178,6 @@ ai-assistant — его недоступность видна в CRM как `ASS
 ## Известные TODO
 - Таймаут+kill для ncnn-subprocess (иначе зависший job держит единственный воркер) — см. [architecture.md](architecture.md).
 - ~~Выбор движка для прода: GPU-бокс vs внешний API~~ — выбран внешний API, затем codex.
-- **Нет проверки живости.** Обрыв сети 12.08 обнаружился только вручную, через сутки. Минимум —
-  внешний пинг `/health` и сигнал при `active > 0` с не растущим `done`.
+- Внешний запуск `scripts/check_service.py` и доставка его non-zero результата в канал оповещений
+  должны оставаться частью инфраструктуры; сам сервис не отправляет уведомления.
 - Вебхуки вместо поллинга: при `MAGNIFIC_UPSCALE=true` цикл ~155 с против 180 с таймаута book-editor.
