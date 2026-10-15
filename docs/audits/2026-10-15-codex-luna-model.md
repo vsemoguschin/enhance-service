@@ -44,3 +44,24 @@
   текущие jobs, использовать штатный drain/blue-green, проверить router end-to-end.
   Magnific остаётся отдельной проблемой аккаунта, в этом изменении не затронут.
 - Не выполнялись merge/push/deploy/restart, destructive или DB-mutating команды.
+
+### Выпуск после разрешения владельца
+
+- Владелец разрешил merge, push и deploy сообщением «го». Main fast-forward
+  до 3e94b36 и push origin/main выполнены; origin был проверен fetch.
+- Production app/config.py и app/codex_provider.py совпали с исходной базой
+  по SHA256. Установлены только эти runtime-файлы, без изменения .env, CLI
+  config.toml, зависимостей и соседних сервисов. Резервная копия и receipt:
+  /opt/codex/releases/enhance-luna-3e94b36-backup.
+- Запущен inactive enhance-service-b (8013). Полный C1 API smoke на
+  синтетическом изображении: done за 38.1с, JPEG 1448x1086, 500679 bytes,
+  HTTP 200, OpenCV decode успешен, face model присутствует.
+- Штатный switch-active-slot.sh b через существующий codex-root выполнил
+  nginx -t и reload; active router теперь b. Через router 8014 проверены
+  health, статус synthetic job и полная выдача результата с совпадением bytes.
+- С сервера редактора (ssh crm) router health вернул status=ok и slot=b.
+- Старый slot a переведён в drain: active=0, queue_len=0, drained=true;
+  затем остановлен; PM2 state сохранён для autostart.
+- Полный UI/export сценарий на пользовательском проекте не запускался.
+  БД и пользовательские файлы не изменялись. Magnific по-прежнему требует
+  отдельного восстановления аккаунта.
