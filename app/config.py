@@ -37,6 +37,10 @@ class Settings:
 
         # Codex
         self.codex_bin = os.getenv("CODEX_BIN", "codex").strip()
+        # Не наследовать модель из общего CLI config: её доступность меняется
+        # независимо от сервиса. Агент только передаёт готовый промпт в imagegen.
+        self.codex_model = os.getenv("CODEX_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
+        self.codex_reasoning_effort = os.getenv("CODEX_REASONING_EFFORT", "low").strip() or "low"
         self.codex_preset = os.getenv("CODEX_PRESET", "identity").strip()
         # Три роли для одного вызова imagegen: оригинал — геометрия/цвет, локально
         # осветлённый кадр — тени, сильный локальный финиш — фактура. Владелец выбрал

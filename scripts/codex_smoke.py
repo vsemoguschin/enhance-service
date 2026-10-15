@@ -60,7 +60,8 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Полный прогон кадра через codex")
     p.add_argument("image", type=Path)
     p.add_argument("--preset", default="preserve", help="ключ из app/prompts.py")
-    p.add_argument("--model", default="", help="переопределить модель агента (по умолчанию из ~/.codex/config.toml)")
+    p.add_argument("--model", default="", help="переопределить CODEX_MODEL агента")
+    p.add_argument("--reasoning-effort", default="", help="переопределить CODEX_REASONING_EFFORT")
     p.add_argument("--no-finish", action="store_true", help="без локальной детализации")
     p.add_argument(
         "--preprocess", choices=("none", "soft", "deblur"), default="none",
@@ -75,37 +76,15 @@ def main() -> int:
 
     os.environ["CODEX_PRESET"] = args.preset
     os.environ["CODEX_TIMEOUT_S"] = str(args.timeout)
+    if args.model:
+        os.environ["CODEX_MODEL"] = args.model
+    if args.reasoning_effort:
+        os.environ["CODEX_REASONING_EFFORT"] = args.reasoning_effort
     if args.no_finish:
         os.environ["FINISH_DETAIL"] = "false"
 
     from app import codex_provider  # noqa: PLC0415
     from app.config import settings  # noqa: PLC0415
-
-    if args.model:
-        # У провайдера модель не параметризована — прод берёт её из конфига CLI.
-        # Для сравнения моделей подменяем сборку команды здесь, не трогая рантайм.
-        import subprocess  # noqa: PLC0415
-
-        def _run(in_path, out_path, workdir, shadow_path=None, detail_path=None):
-            cmd = [settings.codex_bin, "exec", "-m", args.model, "-C", str(workdir),
-                   "-s", "workspace-write", "--skip-git-repo-check",
-                   codex_provider._build_prompt(
-                       in_path, out_path, shadow_path, detail_path
-                   )]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True, cwd=str(workdir), stdin=subprocess.DEVNULL,
-                                    start_new_session=True)
-            try:
-                stdout, stderr = proc.communicate(timeout=settings.codex_timeout_s)
-            except subprocess.TimeoutExpired as e:
-                codex_provider._kill_process_group(proc)
-                raise codex_provider.CodexError(f"не уложился в {settings.codex_timeout_s}с") from e
-            if proc.returncode != 0:
-                raise codex_provider.CodexError(f"вернул {proc.returncode}: {(stderr or stdout).strip()[-300:]}")
-            if not out_path.exists() or out_path.stat().st_size == 0:
-                raise codex_provider.CodexError(f"нет результата. Хвост: {(stdout or '').strip()[-300:]}")
-
-        codex_provider._run_codex = _run
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     suffix = (

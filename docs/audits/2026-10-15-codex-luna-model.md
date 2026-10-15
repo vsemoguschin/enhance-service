@@ -29,3 +29,18 @@
    корневому AGENTS.md и .agent/memory/README.md.
 
 ## Результат
+
+- Добавлены независимые CODEX_MODEL=gpt-5.6-luna и CODEX_REASONING_EFFORT=low;
+  CLI получает явные -m/-c и --ephemeral, без изменения общего config.toml.
+- scripts/codex_smoke.py использует production provider вместо устаревшего monkeypatch.
+- Проверены все 16 unittest, git diff --check и diff вручную.
+- Полный isolated provider smoke на codex: синтетическое изображение 640x480,
+  три reference, настоящий imagegen, финиш и JPEG — успех за 53.1с,
+  результат 1448x1086, 520066 bytes, декодируется OpenCV.
+  Каталог теста временный, production source/config/process не менялись.
+- Изменены .env.example, app/config.py, app/codex_provider.py,
+  scripts/codex_smoke.py, tests/test_codex_multiref.py; добавлен этот audit.
+- Production release ожидает явного разрешения владельца. При выпуске проверить
+  текущие jobs, использовать штатный drain/blue-green, проверить router end-to-end.
+  Magnific остаётся отдельной проблемой аккаунта, в этом изменении не затронут.
+- Не выполнялись merge/push/deploy/restart, destructive или DB-mutating команды.

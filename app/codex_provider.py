@@ -134,6 +134,11 @@ def _run_codex(
     cmd = [
         settings.codex_bin,
         "exec",
+        "--ephemeral",
+        "-m",
+        settings.codex_model,
+        "-c",
+        f'model_reasoning_effort="{settings.codex_reasoning_effort}"',
         "-C",
         str(workdir),
         "-s",

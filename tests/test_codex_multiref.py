@@ -11,6 +11,25 @@ from app.config import settings
 
 
 class CodexMultiReferenceTest(unittest.TestCase):
+    def test_codex_invocation_pins_service_model_and_effort(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            out = root / "out.png"
+            out.write_bytes(b"generated")
+            with (
+                patch.object(settings, "codex_model", "gpt-5.6-luna"),
+                patch.object(settings, "codex_reasoning_effort", "low"),
+                patch.object(codex_provider.subprocess, "Popen") as popen,
+            ):
+                popen.return_value.communicate.return_value = ("OK", "")
+                popen.return_value.returncode = 0
+                codex_provider._run_codex(root / "in.png", out, root)
+            command = popen.call_args.args[0]
+            self.assertEqual(command[command.index("-m") + 1], "gpt-5.6-luna")
+            self.assertEqual(command[command.index("-c") + 1], 'model_reasoning_effort="low"')
+            self.assertIn("--ephemeral", command)
+            self.assertEqual(command[command.index("-s") + 1], "workspace-write")
+
     @staticmethod
     def _sample() -> np.ndarray:
         x = np.linspace(15, 235, 96, dtype=np.uint8)
