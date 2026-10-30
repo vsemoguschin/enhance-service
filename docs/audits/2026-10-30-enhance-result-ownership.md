@@ -87,3 +87,29 @@
   Контракт thread_id → каталог imagegen подтверждён на настоящем runtime.
 - У синтетических кадров не проверялись лица; проход использовал три стандартных
   references и штатный finish. Данные проектов и сохранённые улучшения не трогались.
+
+### Выпуск и финализация
+
+- Merge `e77cb474951236a245d0f41fc26d44e8d7a28a68` опубликован в origin/main;
+  dev source обновлён штатным plan. Linux unit tests exact main: **30/30 PASS**.
+- Штатный artifact deploy собрал и запустил immutable release в slot b, router
+  переключился на b. Однако helper вернул `operation_blocked`, deploy-state стал
+  `recovery_required`, старый a ещё не был draining. Первичная причина в нормализованном
+  ответе helper не сохранена; гипотезу о задержке reload нельзя считать доказанной.
+- До продолжения проверены exact SHA, kernel/PM2 identity обоих процессов, доступность
+  обоих metrics, три последовательных router health b и старая очередь. Под deploy-lock
+  сохранён private recovery receipt; затем штатные executor drain(a), PM2 save и
+  write_state(complete) завершили уже подтверждённое переключение. Повторного deploy,
+  restart, отката и преждевременной остановки процессов не было.
+- Финальный active slot b: `e77cb47`, прежний a: `7d52674`, draining; 20 resident jobs
+  сохранены до естественного TTL. Concurrency 3 и текущие модель/effort сохранены.
+- Полный production C1 smoke через router: POST/start 200, affinity b, status done,
+  result 200 image/jpeg, OpenCV decode PASS, 1448×1086, 212464 bytes, 32.1 секунды.
+  Сходство с синтетическим исходником подтверждено; hashes обоих runtime-файлов
+  (`codex_artifact.py`, `codex_provider.py`) совпали с локальным main.
+- С сервера book-editor router health 200, status ok, slot b, engine cli/face_model/
+  multi_reference/finish true. UI/export на пользовательском проекте не запускался;
+  прежде сохранённое ошибочное улучшение не исправлялось.
+- Финализация: `docs/providers.md` описывает контракт принадлежности и проверку CLI,
+  operational runbook и отчёт владельцу обновлены отдельно в закрытом knowledge repo.
+  Финализирующий commit меняет только документацию, повторный runtime deploy не нужен.
