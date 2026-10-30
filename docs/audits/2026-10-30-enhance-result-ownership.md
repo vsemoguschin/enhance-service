@@ -38,4 +38,34 @@
 
 ## Результат
 
-В работе.
+- Добавлен `app/codex_artifact.py`: identity берётся только из единственного
+  `thread.started` JSON-события CLI при завершённом turn. Выбирается единственный
+  regular image artifact из generated_images/<thread_id>; ссылки, отсутствующие,
+  неоднозначные, пустые и oversized файлы отклоняются. Чужие session dirs не обходятся.
+- `app/codex_provider.py` запускает CLI с `--json`, сам сохраняет проверенные байты
+  в свой временный output и игнорирует агентский выбор out.png. Hardlink заменяется
+  новым файлом, symlink отклоняется; чужой объект при записи не изменяется.
+- В prompt сохранены прежние refs и enhancement instructions; выбор/перенос файла
+  убран из обязанностей агента. Модель, effort, concurrency, очередь, API, geometry,
+  finish, fallback и качество JPEG не менялись. Новые ошибки provenance проходят
+  существующий provider fallback; если он тоже недоступен, задача завершается ошибкой.
+- Диагностика успеха содержит opaque thread_id и SHA-256 артефакта. JSON stdout
+  не попадает в сообщения об ошибках (там могут быть image/tool payloads).
+- Изменены `app/codex_provider.py`, `tests/test_codex_multiref.py`; добавлены
+  `app/codex_artifact.py`, `tests/test_codex_artifact.py` и этот audit. Удалённых файлов нет.
+- Проверки: `python -m unittest discover -s tests -v` — **30/30 PASS**;
+  `python -m compileall -q app tests`, `git diff --check` и staged diff check — PASS.
+  Тесты работали с отдельными temp work/lock paths, без credential files и сети.
+- Регрессионный сценарий запускает два реальных локальных subprocess fake CLI
+  одновременно, с различными синтетическими изображениями и намеренно перепутанными
+  out.png. Проверены оба порядка завершения; каждая задача получает свой результат.
+  Дополнительно проверены missing/ambiguous output, invalid identity, чужой output
+  без собственного артефакта, links/nonregular files и отсутствие payloads в ошибках.
+- Ограничения: это защита от выбора чужого файла между CLI-сессиями, а не семантическая
+  проверка содержимого ответа самой image model. Неизвестный layout CLI отклоняется,
+  без unsafe fallback на out.png или общий «последний файл». Перед rollout нужен
+  live smoke с двумя синтетическими изображениями на установленной Linux CLI,
+  подтверждающий thread_id/layout и реальный builtin imagegen. В этой задаче живые
+  генерации не запускались; smoke с fake CLI не заменяет этот acceptance check.
+- Merge/push/deploy/restart/миграции и изменения данных проектов не выполнялись.
+  Работа изолирована в `agent/2026-10-30-enhance-result-ownership`; main не менялся.
