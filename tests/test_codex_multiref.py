@@ -20,6 +20,9 @@ class CodexMultiReferenceTest(unittest.TestCase):
                 patch.object(settings, "codex_model", "gpt-5.6-luna"),
                 patch.object(settings, "codex_reasoning_effort", "low"),
                 patch.object(codex_provider.subprocess, "Popen") as popen,
+                patch.object(codex_provider, "read_session_artifact", return_value=(
+                    "019a3710-0000-7000-8000-000000000001", b"own-generated-image",
+                )),
             ):
                 popen.return_value.communicate.return_value = ("OK", "")
                 popen.return_value.returncode = 0
@@ -28,7 +31,9 @@ class CodexMultiReferenceTest(unittest.TestCase):
             self.assertEqual(command[command.index("-m") + 1], "gpt-5.6-luna")
             self.assertEqual(command[command.index("-c") + 1], 'model_reasoning_effort="low"')
             self.assertIn("--ephemeral", command)
+            self.assertIn("--json", command)
             self.assertEqual(command[command.index("-s") + 1], "workspace-write")
+            self.assertEqual(out.read_bytes(), b"own-generated-image")
 
     @staticmethod
     def _sample() -> np.ndarray:

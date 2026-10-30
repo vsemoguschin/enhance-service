@@ -7,15 +7,16 @@ docs/audits/2026-08-10-magnific-api-test.md). Seedream пересобирает 
 и без кредитов» — сознательный размен.
 
 Механика: `codex exec` запускается неинтерактивно в одноразовом рабочем каталоге, кладёт
-результат в заранее заданный файл, мы его валидируем. Агент запускается с sandbox
-workspace-write и видит только свой каталог задачи.
+результат в каталог сессии imagegen. Wrapper забирает его по thread_id из JSON CLI,
+не доверяя выбору/копированию файла агентом. Sandbox workspace-write ограничивает
+запись команд, но не изолирует общий generated_images.
 
 Ограничения на боксе (2 ядра, 1 ГБ RAM): один-два воркера, не больше — каждый прогон это
 отдельный node-процесс рядом с ai-assistant.
 """
+import hashlib
 import logging
 import os
-import shutil
 import signal
 import subprocess
 import tempfile
@@ -28,6 +29,7 @@ import cv2
 
 from . import finish
 from .config import settings
+from .codex_artifact import CodexArtifactError, read_session_artifact
 from .prompts import (
     CODEX_IDENTITY_REFERENCE_PROMPT,
     CODEX_IDENTITY_SHADOW_REFERENCE_PROMPT,
@@ -74,7 +76,7 @@ def _build_prompt(
     identity_path: Optional[Path] = None,
     identity_shadow_path: Optional[Path] = None,
 ) -> str:
-    """Инструкция агенту: одна задача, фиксированный путь результата, короткий ответ."""
+    """Инструкция агенту: один imagegen; выбор и копирование результата делает wrapper."""
     if shadow_path is not None and detail_path is not None:
         reference_lines = [
             f"1. {in_path} — authoritative original/edit target and sole source of composition;",
@@ -106,7 +108,10 @@ def _build_prompt(
         "Улучши фотографию с помощью skill imagegen. Вызови imagegen ровно один раз.\n"
         f"{references}"
         f"Промпт для imagegen: «{enhancement_prompt}»\n"
-        f"Сохрани результат СТРОГО в файл {out_path} (скопируй туда сгенерированный файл).\n"
+        "Используй только результат этого вызова imagegen в текущей сессии. "
+        "Не ищи последние файлы в generated_images и не используй результаты других сессий.\n"
+        f"Сервис сам сохранит результат текущей сессии в {out_path}. "
+        "Не копируй, не перемещай и не удаляй сгенерированные файлы.\n"
         "Не выполняй никаких других задач, не меняй другие файлы, не задавай вопросов.\n"
         "В финальном ответе напиши только OK или FAIL."
     )
@@ -135,6 +140,7 @@ def _run_codex(
         settings.codex_bin,
         "exec",
         "--ephemeral",
+        "--json",
         "-m",
         settings.codex_model,
         "-c",
@@ -192,26 +198,41 @@ def _run_codex(
 
     if proc.returncode != 0:
         elapsed = round(time.monotonic() - started, 1)
-        tail = _safe_tail(stderr or stdout or "")
+        # JSON stdout may contain tool/image payloads; never put it in an error log.
+        tail = _safe_tail(stderr) if stderr else "cli-exit-error"
         raise CodexError(
             f"stage=exit exit_code={proc.returncode} elapsed_s={elapsed} "
             f"refs={len(roles)} roles={','.join(roles)} reason={tail}"
         )
 
-    if not out_path.exists() or out_path.stat().st_size == 0:
-        elapsed = round(time.monotonic() - started, 1)
-        tail = _safe_tail(stdout or stderr or "")
-        raise CodexError(
-            f"stage=result-missing exit_code={proc.returncode} elapsed_s={elapsed} "
-            f"refs={len(roles)} roles={','.join(roles)} reason={tail}"
+    try:
+        generated_root = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "generated_images"
+        thread_id, artifact = read_session_artifact(stdout, generated_root, settings.max_input_bytes)
+        # Ignore any out.png selected by the agent, including a valid foreign image.
+        # Replace the directory entry, never truncate an agent-created hardlink.
+        if out_path.is_symlink():
+            raise CodexArtifactError("invalid-output-link")
+        out_path.unlink(missing_ok=True)
+        output_fd = os.open(
+            out_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600,
         )
+        with os.fdopen(output_fd, "wb") as stream:
+            stream.write(artifact)
+    except (CodexArtifactError, OSError) as error:
+        reason = str(error) if isinstance(error, CodexArtifactError) else "output-write-failed"
+        raise CodexError(
+            f"stage=result-provenance reason={reason} "
+            f"elapsed_s={round(time.monotonic() - started, 1)} refs={len(roles)}"
+        ) from None
 
     log.info(
-        "codex exec: готово elapsed_s=%.1f refs=%d roles=%s bytes=%d",
+        "codex exec: готово elapsed_s=%.1f refs=%d roles=%s bytes=%d thread=%s artifact_sha256=%s",
         time.monotonic() - started,
         len(roles),
         ",".join(roles),
-        out_path.stat().st_size,
+        len(artifact),
+        thread_id,
+        hashlib.sha256(artifact).hexdigest(),
     )
 
 
@@ -366,7 +387,7 @@ def enhance(
     if progress_cb:
         progress_cb(5)
 
-    # Одноразовый каталог: агент работает только внутри него и не видит остальной диск.
+    # Одноразовый cwd для inputs/output. Общий imagegen root проверяется по thread_id.
     settings.work_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=str(settings.work_dir), prefix="codex_") as td:
         workdir = Path(td)
